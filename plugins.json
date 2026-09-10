@@ -1,5 +1,47 @@
 [
     {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/OpenAnime.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "OpenAnime",
+        "internalName": "OpenAnime",
+        "authors": [
+            "qwert"
+        ],
+        "description": "Animeler.",
+        "fileSize": 75097,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Anime"
+        ],
+        "iconUrl": "https://openani.me/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-49114c1d6b31b21491f7d93383601e3cbceec9fa960978efe09ee67baa488e0f"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/AsyaAnimeleri.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "AsyaAnimeleri",
+        "internalName": "AsyaAnimeleri",
+        "authors": [
+            "qwer"
+        ],
+        "description": "Animeler.",
+        "fileSize": 33744,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://asyaanimeleri.top/wp-content/uploads/2022/01/cropped-Asya-animeleri-12-e1629130525708-2-e1641560729784.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-8c8413367c14e21b8b2efa33ba2df4e4b9ef57b447a753f8fc930c1053153a7e"
+    },
+    {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.cs3",
         "status": 1,
         "version": 1,
@@ -8,7 +50,7 @@
         "authors": [
             "KaifTaufiq"
         ],
-        "description": "Youtube \u0130zle",
+        "description": "Youtube",
         "fileSize": 14102,
         "repositoryUrl": "https://github.com/gitlihub0/ezyx",
         "tvTypes": [
