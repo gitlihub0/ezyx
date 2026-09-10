@@ -1,0 +1,105 @@
+name: Build
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - 'repo.json'
+      - 'DomainCheck.py'
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Build Plugins
+        working-directory: src
+        run: |
+          chmod +x gradlew
+          ./gradlew make makePluginsJson
+
+      - name: Prepare builds branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git ls-remote --exit-code --heads \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" \
+            builds > /dev/null 2>&1; then
+
+            echo "builds branch exists."
+
+            git clone \
+              --branch builds \
+              --single-branch \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" \
+              builds
+
+          else
+
+            echo "builds branch does not exist. Creating it."
+
+            mkdir builds
+            cd builds
+
+            git init
+            git checkout -b builds
+            git remote add origin \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          fi
+
+      - name: Copy CS3 files
+        run: |
+          find src -type f -name "*.cs3" -exec cp {} builds/ \;
+
+          if [ -f "src/build/plugins.json" ]; then
+            cp src/build/plugins.json builds/
+          fi
+
+          echo "Build files:"
+          ls -lah builds
+
+      - name: Push builds
+        working-directory: builds
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Build $GITHUB_SHA"
+
+          git push origin builds --force
