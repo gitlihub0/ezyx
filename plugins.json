@@ -1,0 +1,26 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "You",
+        "internalName": "You",
+        "authors": [
+            "KaifTaufiq"
+        ],
+        "description": "Youtube \u0130zle",
+        "fileSize": 14102,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "tvTypes": [
+            "Other",
+            "Live",
+            "TvSeries"
+        ],
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/3840px-YouTube_full-color_icon_%282017%29.svg.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-4fea03c1615a9537faabcffe7463aecdaa56c126248e596d256f3715fde70e9d",
+        "jarFileSize": 47802,
+        "jarUrl": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.jar",
+        "jarHash": "sha256-677bced9dbd526176ede5a77f65df4b9eea8c410cabe1a224ddc9aa6618d9c45"
+    }
+]
