@@ -42,7 +42,7 @@
         "fileHash": "sha256-8c8413367c14e21b8b2efa33ba2df4e4b9ef57b447a753f8fc930c1053153a7e"
     },
     {
-        "url": "https://raw.githubusercontent.com/gitlihub0/xyze/builds/Turkdizileri.cs3",
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/Turkdizileri.cs3",
         "status": 1,
         "version": 33,
         "name": "Turkdizileri",
@@ -52,7 +52,7 @@
         ],
         "description": "TRT1, Showtv, Kanal D ve daha fazla site tek bir eklentide birleşiyor.",
         "fileSize": 166804,
-        "repositoryUrl": "https://github.com/gitlihub0/xyze",
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
         "language": "tr",
         "tvTypes": [
           "Movie"
