@@ -62,6 +62,34 @@
         "fileHash": "sha256-3acbf270480ea67ef4fc787c8004b0a79f9ca67f08dc74d94f915d5c9a410cf5"
     },
     {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/KraptorPlus.cs3",
+        "status": 1,
+        "version": 86,
+        "name": "KraptorPlus",
+        "internalName": "KraptorPlus",
+        "authors": [
+          "kraptor",
+          "Phisher98",
+          "ByAyzen",
+          "Megix"
+        ],
+        "description": "Bir çok sitenin birleştiği toplama eklenti.",
+        "fileSize": 628224,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+          "TvSeries",
+          "Movie",
+          "Anime",
+          "Cartoon",
+          "AsianDrama",
+          "AnimeMovie"
+        ],
+        "iconUrl": "https://raw.githubusercontent.com/etumen/cs-kraptor/refs/heads/master/.github/icons/logo/kraptorplus.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-13c887884db38914ddd63d92df5965f2f950ca6b15b0a4aac989a4a048f6e746"
+    },
+    {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.cs3",
         "status": 1,
         "version": 1,
