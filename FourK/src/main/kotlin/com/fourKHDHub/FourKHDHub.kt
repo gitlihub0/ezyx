@@ -5,14 +5,13 @@ import androidx.annotation.RequiresApi
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.Episode
-import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.json.JSONArray
 import org.jsoup.nodes.Element
-import com.lagradost.cloudstream3.toNewSearchResponseList
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -390,19 +389,21 @@ class FourKHDHub : MainAPI() {
 
             // Eğer Türkçe ses bulduysak, yeni bir link oluşturarak listeye (TR Dublaj) etiketiyle ekle
             if (trAudioUrl != null) {
-                val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, trAudioUrl!!)
-                callback(
-                    newExtractorLink(
-                        source = "${link.source} (TR Ses)",
-                        name = "${link.name} [TR Dublaj]",
-                        url = mergedUrl,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        // HATANIN ÇÖZÜMÜ: referer ve quality burada (Süslü parantez içinde) tanımlanmalıdır.
-                        this.referer = link.referer
-                        this.quality = link.quality
-                    }
-                )
+                // Coroutine sarmalayıcısı: 'newExtractorLink' asenkron çağrısını sarmalar.
+                CoroutineScope(Dispatchers.IO).launch {
+                    val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, trAudioUrl!!)
+                    callback(
+                        newExtractorLink(
+                            source = "${link.source} (TR Ses)",
+                            name = "${link.name} [TR Dublaj]",
+                            url = mergedUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = link.referer
+                            this.quality = link.quality
+                        }
+                    )
+                }
             }
         }
 
