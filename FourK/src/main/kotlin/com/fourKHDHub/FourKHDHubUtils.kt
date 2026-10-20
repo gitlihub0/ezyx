@@ -137,68 +137,9 @@ suspend fun loadSourceNameExtractor(
 // ==========================================
 object FullHDFilmMerger {
 
-    private fun atob(s: String): String = String(Base64.decode(s, Base64.DEFAULT), Charsets.UTF_8)
-
-    private fun rtt(s: String): String {
-        return s.map { c ->
-            when (c) {
-                in 'a'..'z' -> ((c - 'a' + 13) % 26 + 'a'.code).toChar()
-                in 'A'..'Z' -> ((c - 'A' + 13) % 26 + 'A'.code).toChar()
-                else -> c
-            }
-        }.joinToString("")
-    }
-
-    private fun smartDecodeLink(raw: String): String? {
-        val trimmed = raw.trim()
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("//")) {
-            return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
-        }
-        try {
-            val rotDecoded = atob(rtt(trimmed)).trim()
-            if (rotDecoded.startsWith("http") || rotDecoded.startsWith("//")) return if (rotDecoded.startsWith("//")) "https:$rotDecoded" else rotDecoded
-        } catch (_: Exception) { }
-
-        try {
-            val b64Decoded = atob(trimmed).trim()
-            if (b64Decoded.startsWith("http") || b64Decoded.startsWith("//")) return if (b64Decoded.startsWith("//")) "https:$b64Decoded" else b64Decoded
-        } catch (_: Exception) { }
-
-        try {
-            val revDecoded = atob(trimmed.reversed()).trim()
-            if (revDecoded.startsWith("http") || revDecoded.startsWith("//")) return if (revDecoded.startsWith("//")) "https:$revDecoded" else revDecoded
-        } catch (_: Exception) { }
-
-        return null
-    }
-
-    private fun collectStringsRecursiveJSON(prefix: String, node: Any?, out: MutableList<Pair<String, String>>) {
-        when (node) {
-            is String -> out.add(Pair(prefix, node))
-            is JSONArray -> {
-                for (i in 0 until node.length()) {
-                    collectStringsRecursiveJSON(prefix, node.opt(i), out)
-                }
-            }
-            is JSONObject -> {
-                val keys = node.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    if (k == "tt" || k == "order") continue
-                    val nextPrefix = if (k == "sx" || k == "t" || k == "p" || k.isBlank()) {
-                        prefix
-                    } else {
-                        if (prefix.isBlank()) k else "${prefix}_$k"
-                    }
-                    collectStringsRecursiveJSON(nextPrefix, node.opt(k), out)
-                }
-            }
-        }
-    }
-
     suspend fun getTurkishAudio(title: String): String? {
         try {
-            // Başlıktaki yılı vs. temizle ki arama daha isabetli olsun (Örn: Spider-Man (2025) -> Spider-Man)
+            // Başlıktaki yılı vs. temizle ki arama daha isabetli olsun
             val cleanTitle = title.replace(Regex("""\(\d{4}\)"""), "").trim().replace(Regex("""\s+"""), "+")
             val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$cleanTitle"
             
@@ -208,51 +149,63 @@ object FullHDFilmMerger {
 
             val movieDoc = app.get(movieUrl).document
 
-            // "scx" JSON değişkeninden şifreli linkleri ayıkla
-            val scripts = movieDoc.select("script").map { it.data() }
-            val rawCandidates = mutableListOf<Pair<String, String>>()
+            // 1. Görseldeki gibi iframe data-src içinden RapidVid URL'sini bul
+            var rapidVidUrl = movieDoc.select("iframe").mapNotNull {
+                it.attr("data-src").ifBlank { it.attr("src") }
+            }.firstOrNull { it.contains("rapidvid") }
 
-            for (script in scripts) {
-                if (!script.contains("scx")) continue
-                val scxJsonString = Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
-                    .find(script)?.groupValues?.get(1) ?: continue
-                try {
-                    val scxObj = JSONObject(scxJsonString)
-                    val keys = scxObj.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        collectStringsRecursiveJSON(k, scxObj.opt(k), rawCandidates)
-                    }
-                } catch (e: Exception) {
-                    Log.e("K_MERGER", "SCX okuma hatası: $e")
-                }
-            }
-
-            var rapidVidUrl: String? = null
-            
-            // ÖNCELİK: İçinde "tr" (Türkçe Dublaj) geçen etiketleri (parçaları) filtrele!
-            val trCandidates = rawCandidates.filter { it.first.contains("tr", ignoreCase = true) }
-            val searchList = trCandidates.ifEmpty { rawCandidates }
-
-            for ((label, candidate) in searchList) {
-                val decoded = smartDecodeLink(candidate)
-                if (decoded != null && decoded.contains("rapidvid")) {
-                    Log.d("K_MERGER", "Seçilen RapidVid URL ($label): $decoded")
-                    rapidVidUrl = decoded
-                    break
-                }
+            if (rapidVidUrl == null) {
+                rapidVidUrl = Regex("""https?://[^\s"'<>]+\b(?:rapidvid)[^\s"'<>]+""").find(movieDoc.html())?.value
             }
 
             if (rapidVidUrl != null) {
+                Log.d("K_MERGER", "RapidVid Iframe Bulundu: $rapidVidUrl")
                 val res = app.get(rapidVidUrl, referer = "https://www.fullhdfilmizlesene.now/").text
                 val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res)?.groupValues?.get(1)
                 
                 if (p8 != null) {
                     val json = JSONObject(decodeSecret(p8))
-                    val cmUrl = json.optString("cm") // cm = ana M3U8 stream bağlantısı
+                    val cmUrl = json.optString("cm") // Ana M3U8
+                    
                     if (cmUrl.isNotBlank() && cmUrl.startsWith("http")) {
-                        Log.d("K_MERGER", "TR Ses M3U8 (cm) Bulundu: $cmUrl")
-                        return cmUrl
+                        Log.d("K_MERGER", "Ana M3U8 Bulundu: $cmUrl")
+
+                        // 2. Ana M3U8 dosyasının İÇİNE GİR ve "TR Dublaj" ses kanalını bul!
+                        val m3u8Content = app.get(cmUrl, referer = "https://rapidvid.org/").text
+                        val audioRegex = Regex("""#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+)"""")
+                        val audioMatches = audioRegex.findAll(m3u8Content).toList()
+
+                        var trAudioUri: String? = null
+
+                        if (audioMatches.isNotEmpty()) {
+                            for (match in audioMatches) {
+                                val fullLine = match.value.lowercase()
+                                // TR Dublaj etiketini arıyoruz
+                                if (fullLine.contains("tr") || fullLine.contains("tur") || fullLine.contains("dublaj")) {
+                                    trAudioUri = match.groupValues[1]
+                                    break
+                                }
+                            }
+                            // Eğer isimlendirme yoksa varsayılan ilk sesi al (Genelde TR olur)
+                            if (trAudioUri == null) {
+                                trAudioUri = audioMatches[0].groupValues[1]
+                            }
+
+                            // M3U8 URI'leri relative (göreceli) olabilir, ana linkle birleştir
+                            if (trAudioUri != null) {
+                                val finalAudioUrl = if (trAudioUri.startsWith("http")) {
+                                    trAudioUri
+                                } else {
+                                    val baseUrl = cmUrl.substringBeforeLast("/")
+                                    "$baseUrl/$trAudioUri"
+                                }
+                                Log.d("K_MERGER", "Ayrıştırılmış TR Ses Linki: $finalAudioUrl")
+                                return finalAudioUrl
+                            }
+                        } else {
+                            // Eğer playlist içinde ayrı ses dosyaları yoksa, bu video zaten Türkçe sesle bütünleşiktir.
+                            return cmUrl
+                        }
                     }
                 }
             }
