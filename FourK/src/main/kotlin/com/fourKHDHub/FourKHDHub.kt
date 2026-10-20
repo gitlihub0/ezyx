@@ -322,7 +322,11 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
+            // Türkçe dublaj: FullHDFilmizlesene'de aranacak başlık bilgisini linklere ekle
+            val trTitle   = tmdbId?.let { TurkishDub.fetchTrTitle(it) }
+            val movieData = hrefs + TurkishDub.marker(fixedTitle, trTitle, fixedYear)
+
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, movieData) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -353,6 +357,12 @@ class FourKHDHub : MainAPI() {
         if (links.isEmpty()) return false
 
         links.amap { raw ->
+            // Türkçe dublaj işaretçisi (dub://...) normal link değildir
+            if (TurkishDub.isMarker(raw)) {
+                runCatching { TurkishDub.load(raw, subtitleCallback, callback) }
+                    .onFailure { Log.e("4KHDHub", "TR dublaj hatası: ${it.message}") }
+                return@amap
+            }
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
