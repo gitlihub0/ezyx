@@ -396,10 +396,12 @@ class FourKHDHub : MainAPI() {
                         source = "${link.source} (TR Ses)",
                         name = "${link.name} [TR Dublaj]",
                         url = mergedUrl,
-                        referer = link.referer,
-                        quality = link.quality,
                         type = ExtractorLinkType.M3U8
-                    )
+                    ) {
+                        // HATANIN ÇÖZÜMÜ: referer ve quality burada (Süslü parantez içinde) tanımlanmalıdır.
+                        this.referer = link.referer
+                        this.quality = link.quality
+                    }
                 )
             }
         }
