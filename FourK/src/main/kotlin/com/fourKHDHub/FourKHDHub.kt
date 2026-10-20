@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.json.JSONArray
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
 
@@ -226,7 +227,12 @@ class FourKHDHub : MainAPI() {
                     }
                 }
 
-                tvSeriesEpisodes += newEpisode(hrefsList.distinct()) {
+                val epPayload1 = JSONObject().apply {
+                    put("links", JSONArray(hrefsList.distinct()))
+                    put("searchTitle", fixedTitle)
+                }.toString()
+
+                tvSeriesEpisodes += newEpisode(epPayload1) {
                     this.season      = season
                     this.episode     = episode
                     this.name        = epName ?: "Episode $episode"
@@ -271,7 +277,12 @@ class FourKHDHub : MainAPI() {
                         }
                     }
 
-                    tvSeriesEpisodes += newEpisode(hrefList.distinct()) {
+                    val epPayload2 = JSONObject().apply {
+                        put("links", JSONArray(hrefList.distinct()))
+                        put("searchTitle", fixedTitle)
+                    }.toString()
+
+                    tvSeriesEpisodes += newEpisode(epPayload2) {
                         this.season      = season
                         this.episode     = nextEpisode
                         this.name        = epName ?: "S${season.toString().padStart(2, '0')} – $fileTitle [$quality, $size]".trim()
@@ -322,7 +333,12 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
+            val moviePayload = JSONObject().apply {
+                put("links", JSONArray(hrefs))
+                put("searchTitle", fixedTitle)
+            }.toString()
+
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, moviePayload) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -344,13 +360,49 @@ class FourKHDHub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val links = try {
-            val arr = org.json.JSONArray(data)
-            (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
-        } catch (_: Exception) {
-            listOf(data).filter { it.isNotBlank() }
-        }.filter { it.isNotBlank() }.distinct()
+        // Yeni JSON formatından linkleri ve başlığı ayıkla
+        val (links, searchTitle) = try {
+            val json = JSONObject(data)
+            val arr = json.optJSONArray("links")
+            val parsedLinks = (0 until (arr?.length() ?: 0)).mapNotNull { arr?.optString(it) }
+            Pair(parsedLinks, json.optString("searchTitle"))
+        } catch (e: Exception) {
+            // Eski önbellek (cache) verisi varsa geriye dönük uyumluluk
+            val fallbackLinks = try {
+                val arr = org.json.JSONArray(data)
+                (0 until arr.length()).mapNotNull { arr.optString(it, "") }
+            } catch (_: Exception) { listOf(data) }
+            Pair(fallbackLinks.filter { it.isNotBlank() }.distinct(), "")
+        }
+
         if (links.isEmpty()) return false
+
+        // Arka planda TR Sesi bul (Eğer başlık iletildiyse)
+        var trAudioUrl: String? = null
+        if (searchTitle.isNotBlank()) {
+            trAudioUrl = FullHDFilmMerger.getTurkishAudio(searchTitle)
+        }
+
+        // ExtractorLink sonuçlarını yakalayıp sesi enjekte edeceğimiz özel callback
+        val interceptCallback: (ExtractorLink) -> Unit = { link ->
+            // Her halükarda orijinal 4K (sadece orijinal sesli) linki göster
+            callback(link)
+
+            // Eğer Türkçe ses bulduysak, yeni bir link oluşturarak listeye (TR Dublaj) etiketiyle ekle
+            if (trAudioUrl != null) {
+                val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, trAudioUrl!!)
+                callback(
+                    newExtractorLink(
+                        source = "${link.source} (TR Ses)",
+                        name = "${link.name} [TR Dublaj]",
+                        url = mergedUrl,
+                        referer = link.referer,
+                        quality = link.quality,
+                        type = ExtractorLinkType.M3U8
+                    )
+                )
+            }
+        }
 
         links.amap { raw ->
             val resolved = try {
@@ -363,9 +415,9 @@ class FourKHDHub : MainAPI() {
 
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
+                    HubCloud().getUrl(resolved, name, subtitleCallback, interceptCallback)
                 } else {
-                    loadExtractor(resolved, name, subtitleCallback, callback)
+                    loadExtractor(resolved, name, subtitleCallback, interceptCallback)
                 }
             } catch (e: Exception) {
                 Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
