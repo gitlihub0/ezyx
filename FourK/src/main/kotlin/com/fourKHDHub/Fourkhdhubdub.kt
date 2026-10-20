@@ -38,6 +38,10 @@ object FourKHDHubDub {
 
     @Volatile private var cachedDomain: String? = null
 
+    /** Son aramanın durumu: loadLinks'te teşhis satırı olarak gösterilir (geçici, hata ayıklama için). */
+    @Volatile var status: String = ""
+    private fun fail(msg: String) { status = msg; Log.e(TAG, msg) }
+
     // ------------------------------------------------------------ Domain
     private suspend fun domain(): String {
         getKey<String>(MANUAL_DOMAIN_KEY)?.takeIf { it.isNotBlank() }?.let { return it.trim().trimEnd('/') }
@@ -65,7 +69,7 @@ object FourKHDHubDub {
             val base = domain()
             Log.d(TAG, "[2] FullHD domain=$base")
             val doc = findFilmPage(base, titles, year)
-            if (doc == null) { Log.e(TAG, "[3] FullHD'de film sayfası bulunamadı"); return null }
+            if (doc == null) { fail("film FullHD'de bulunamadı (terimler=$titles, domain=$base)"); return null }
             val pageUrl = doc.location().ifBlank { base }
             Log.d(TAG, "[3] film sayfası=$pageUrl")
 
@@ -75,10 +79,11 @@ object FourKHDHubDub {
                 val audio = extractTurkishAudio(rapid, pageUrl)
                 if (audio != null) { Log.d(TAG, "[5] TR ses=${audio.url}"); return audio }
             }
-            Log.e(TAG, "[5] hiçbir rapidvid linkinden TR ses çıkmadı")
+            if (rapids.isEmpty()) fail("sayfada rapidvid linki yok (${pageUrl.takeLast(40)})")
+            else if (status.isBlank()) fail("rapidvid'den TR ses çıkmadı")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "findTurkishAudio hatası: $e")
+            fail("hata: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
@@ -204,23 +209,25 @@ object FourKHDHubDub {
             .onFailure { Log.e(TAG, "rapidvid sayfa hatası ($rapidUrl): $it") }
             .getOrNull() ?: return null
         val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res.text)?.groupValues?.get(1)
-        if (p8 == null) { Log.e(TAG, "_p8 yok ($rapidUrl), HTTP ${res.code}"); return null }
+        if (p8 == null) { fail("rapidvid sayfasında _p8 yok (HTTP ${res.code})"); return null }
         val cm = runCatching { JSONObject(decodeSecret(p8)).optString("cm") }
             .onFailure { Log.e(TAG, "p8 çözme hatası: $it") }
             .getOrNull()?.takeIf { it.startsWith("http") }
-        if (cm == null) { Log.e(TAG, "cm alanı yok"); return null }
+        if (cm == null) { fail("_p8 çözülemedi veya cm yok"); return null }
 
         val master = runCatching { app.get(cm, referer = RAPID_REFERER).text }
             .onFailure { Log.e(TAG, "master isteği hata: $it") }
             .getOrNull() ?: return null
-        if (!master.trimStart().startsWith("#EXTM3U")) { Log.e(TAG, "master HLS değil: ${master.take(80)}"); return null }
+        if (!master.trimStart().startsWith("#EXTM3U")) { fail("master HLS değil"); return null }
 
         // Önek (mq/m6/ma...) sabit varsayılmaz: her seferinde master'dan okunur.
         val line = master.lineSequence().firstOrNull {
             it.startsWith("#EXT-X-MEDIA") && it.contains("TYPE=AUDIO") &&
                 Regex("""LANGUAGE="tr"""", RegexOption.IGNORE_CASE).containsMatchIn(it)
-        } ?: return null
-        val uri = Regex("""URI="([^"]+)"""").find(line)?.groupValues?.get(1) ?: return null
+        }
+        if (line == null) { fail("master'da LANGUAGE=\"tr\" ses satırı yok"); return null }
+        val uri = Regex("""URI="([^"]+)"""").find(line)?.groupValues?.get(1)
+        if (uri == null) { fail("TR ses satırında URI yok"); return null }
 
         val absolute = runCatching { URI(cm).resolve(uri).toString() }.getOrNull() ?: return null
         return DubAudio(absolute, RAPID_REFERER, "tr")
