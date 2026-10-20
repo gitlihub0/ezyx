@@ -93,7 +93,14 @@ object FourKHDHubDub {
     }
 
     private suspend fun findFilmPage(base: String, titles: List<String>, year: Int?): Document? {
-        for (title in titles) {
+        // Site başlığı TMDB'den farklı olabilir (ör. "Örümcek-Adam: Yepyeni Bir Gün"), bu yüzden
+        // ":" sonrası alt başlık da ayrıca aranır ve eşleşme hem başlığa hem adres slug'ına bakar.
+        val wanted = titles.map { norm(it) }.filter { it.length >= 4 }
+        val subtitles = titles.mapNotNull { it.substringAfter(":", "").trim().takeIf { s -> s.length >= 4 } }
+        val searchTerms = (titles + subtitles).distinct()
+        Log.d(TAG, "arama terimleri=$searchTerms")
+
+        for (title in searchTerms) {
             val q = URLEncoder.encode(title, "UTF-8").replace("+", "%20")
             val results = runCatching { app.get("$base/arama/$q").document }
                 .onFailure { Log.e(TAG, "arama isteği hata ($title): $it") }
@@ -104,10 +111,12 @@ object FourKHDHubDub {
                 val href = li.selectFirst("a")?.attr("href")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val url = if (href.startsWith("http")) href else base + "/" + href.trimStart('/')
                 t to url
-            }.filter { (t, _) ->
+            }.filter { (t, url) ->
                 val a = norm(t.replace(Regex("""\s+izle\s*$""", RegexOption.IGNORE_CASE), ""))
-                val b = norm(title)
-                a.isNotEmpty() && (a == b || a.contains(b) || b.contains(a))
+                val slug = norm(url.substringAfterLast("/film/", url).trimEnd('/'))
+                a.isNotEmpty() && wanted.any { w ->
+                    a == w || a.contains(w) || w.contains(a) || slug.contains(w)
+                }
             }.take(5)
             Log.d(TAG, "eşleşen adaylar=${cands.map { it.first }}")
 
