@@ -1,0 +1,130 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/Anizium.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "Anizium",
+        "internalName": "Anizium",
+        "authors": [
+            "qwer"
+        ],
+        "description": "4K Anime.",
+        "fileSize": 56453,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anizium.com/assets/images/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-b31db1e8a294ddfe850ad7fbc51f06df61b896787535c44f6ab99a36c4a60acc"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/ddizi.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "ddizi",
+        "internalName": "ddizi",
+        "authors": [
+            "qwert"
+        ],
+        "description": "Ddizi",
+        "fileSize": 39583,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "TvSeries"
+        ],
+        "iconUrl": "https://www.ddizi.tel/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-83a1f92f4a6ca6cdc1a410c3260fb06951b401657c1be1762c4fee39fe502d88"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/fullhdfilm.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "fullhdfilm",
+        "internalName": "fullhdfilm",
+        "authors": [
+            "qwert"
+        ],
+        "description": "FullHDFilmizlesene",
+        "fileSize": 62189,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Movie"
+        ],
+        "iconUrl": "https://www.fullhdfilmizlesene.now/android-chrome-192x192.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-a682972af763a29020de825b462066927a7af1bf232d7dde07547dc2ab01471e"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/TvDiziler.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "TvDiziler",
+        "internalName": "TvDiziler",
+        "authors": [
+            "qwert"
+        ],
+        "description": "TvDiziler - Yerli diziler, T\u00fcrk\u00e7e dublaj/altyaz\u0131l\u0131 b\u00f6l\u00fcmler.",
+        "fileSize": 46829,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://tvdiziler.tv/assets/images/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-3cb07716ae1b2100514e1969450cc8bf77110dd696399d590e916faa19ae45d2"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/YFilmizle.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "YFilmizle",
+        "internalName": "YFilmizle",
+        "authors": [
+            "qwert"
+        ],
+        "description": "YFilmizle - T\u00fcrk\u00e7e dublajl\u0131 ve altyaz\u0131l\u0131 filmler",
+        "fileSize": 34312,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "tr",
+        "tvTypes": [
+            "Movie"
+        ],
+        "iconUrl": "https://www.google.com/s2/favicons?domain=yfilmizle.com&sz=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-148fde32010c2a10e39f16376edc5101aabe9b436b1be24ed3c9dfeb66d21ea6"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "You",
+        "internalName": "You",
+        "authors": [
+            "KaifTaufiq"
+        ],
+        "description": "Youtube \u0130zle",
+        "fileSize": 14104,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "tvTypes": [
+            "Other",
+            "Live",
+            "TvSeries"
+        ],
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/3840px-YouTube_full-color_icon_%282017%29.svg.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-7aee38958891a8091b91c5ff8d81c28b2feef418cf0cf5c33c92df56297b341c",
+        "jarFileSize": 48153,
+        "jarUrl": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/You.jar",
+        "jarHash": "sha256-570bfb6c5c66348756e1bfe01b65a82cefada7e185e7a7784b502e8c2e8a0397"
+    }
+]
