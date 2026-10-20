@@ -15,5 +15,9 @@ class FourKHDHubPlugin : Plugin() {
         registerExtractorAPI(Hubcdnn())
         registerExtractorAPI(PixelDrainDev())
         registerExtractorAPI(HUBCDN())
+        
+        // Türkçe ses çekmek için eklediğimiz yeni çözücüler:
+        registerExtractorAPI(RapidVid())
+        registerExtractorAPI(TurboImgz())
     }
 }
