@@ -214,4 +214,76 @@ object FullHDFilmMerger {
                 val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res)?.groupValues?.get(1)
                 
                 if (p8 != null) {
-                    val json =
+                    val json = JSONObject(decodeSecret(p8))
+                    val cmUrl = json.optString("cm") // Ana M3U8
+                    
+                    if (cmUrl.isNotBlank() && cmUrl.startsWith("http")) {
+                        val m3u8Content = app.get(cmUrl, referer = "https://rapidvid.org/").text
+                        
+                        // Tüm ses kanallarını ayıkla
+                        val audioLines = Regex("""#EXT-X-MEDIA:TYPE=AUDIO[^\n]*""").findAll(m3u8Content).map { it.value }.toList()
+
+                        var trAudioUri: String? = null
+                        var fallbackUri: String? = null
+
+                        for (line in audioLines) {
+                            val uriMatch = Regex("""URI="([^"]+)"""").find(line)
+                            val uri = uriMatch?.groupValues?.get(1) ?: continue
+                            
+                            if (fallbackUri == null) fallbackUri = uri
+                            
+                            val lowerLine = line.lowercase()
+                            // "TR Dublaj" sesini bul
+                            if (lowerLine.contains("tr ") || lowerLine.contains("tur") || lowerLine.contains("dublaj") || lowerLine.contains("turkish")) {
+                                trAudioUri = uri
+                                break
+                            }
+                        }
+
+                        if (trAudioUri == null) trAudioUri = fallbackUri
+
+                        if (trAudioUri != null) {
+                            // Göreceli bağlantıyı ana bağlantıyla birleştir
+                            return if (trAudioUri.startsWith("http")) {
+                                trAudioUri
+                            } else {
+                                val baseUrl = cmUrl.substringBeforeLast("/")
+                                "$baseUrl/$trAudioUri"
+                            }
+                        } else {
+                            // Ekstra ses kanalı yoksa, ana dosyayı geri gönder
+                            return cmUrl
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("K_MERGER", "TR Ses hata: $e")
+        }
+        return null
+    }
+
+    private fun decodeSecret(encodedString: String): String {
+        val reversedBase64Input = encodedString.reversed()
+        val tString = base64Decode(reversedBase64Input)
+        val oBuilder = StringBuilder()
+        val key = "K9L"
+        for (index in tString.indices) {
+            val offset = key[index % key.length].code % 5 + 1
+            oBuilder.append((tString[index].code - offset).toChar())
+        }
+        return base64Decode(oBuilder.toString())
+    }
+
+    fun buildMergedM3U8(videoUrl: String, audioUrl: String): String {
+        val m3u8 = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="tr-audio",NAME="Türkçe Dublaj",DEFAULT=YES,AUTOSELECT=YES,URI="$audioUrl"
+            #EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=3840x2160,AUDIO="tr-audio"
+            $videoUrl
+        """.trimIndent()
+        // ExoPlayer'ın okuyabilmesi için M3U8 metnini Base64 Data URI'ye çeviriyoruz
+        val b64 = Base64.encodeToString(m3u8.toByteArray(), Base64.NO_WRAP)
+        return "data:application/vnd.apple.mpegurl;base64,${b64.replace("\n", "")}"
+    }
+}
