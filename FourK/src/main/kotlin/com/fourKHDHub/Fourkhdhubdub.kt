@@ -55,19 +55,27 @@ object FourKHDHubDub {
     suspend fun findTurkishAudio(tmdbId: Int, apiBase: String, apiKey: String): DubAudio? {
         return try {
             val meta = JSONObject(app.get("$apiBase/movie/$tmdbId?api_key=$apiKey&language=tr-TR").text)
-            val titles = listOf(meta.optString("title"), meta.optString("original_title"))
+            // Orijinal ad önce: FullHD başlıkları genelde İngilizce adı da içeriyor.
+            val titles = listOf(meta.optString("original_title"), meta.optString("title"))
                 .filter { it.isNotBlank() }.distinct()
             val year = meta.optString("release_date").substringBefore("-").toIntOrNull()
+            Log.d(TAG, "[1] TMDB $tmdbId -> başlıklar=$titles yıl=$year")
             if (titles.isEmpty()) return null
 
             val base = domain()
-            val doc = findFilmPage(base, titles, year) ?: return null
+            Log.d(TAG, "[2] FullHD domain=$base")
+            val doc = findFilmPage(base, titles, year)
+            if (doc == null) { Log.e(TAG, "[3] FullHD'de film sayfası bulunamadı"); return null }
             val pageUrl = doc.location().ifBlank { base }
+            Log.d(TAG, "[3] film sayfası=$pageUrl")
 
-            for (rapid in rapidLinks(doc)) {
+            val rapids = rapidLinks(doc)
+            Log.d(TAG, "[4] rapidvid linkleri=$rapids")
+            for (rapid in rapids) {
                 val audio = extractTurkishAudio(rapid, pageUrl)
-                if (audio != null) return audio
+                if (audio != null) { Log.d(TAG, "[5] TR ses=${audio.url}"); return audio }
             }
+            Log.e(TAG, "[5] hiçbir rapidvid linkinden TR ses çıkmadı")
             null
         } catch (e: Exception) {
             Log.e(TAG, "findTurkishAudio hatası: $e")
@@ -76,12 +84,21 @@ object FourKHDHubDub {
     }
 
     // ------------------------------------------------------------ Film sayfasını bul
-    private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9ığüşöçİĞÜŞÖÇ]"), "")
+    /** Türkçe harfleri ASCII'ye indirger (İ/ı/ğ/ü/ş/ö/ç), sonra harf-rakam dışını atar. */
+    private fun norm(s: String): String {
+        val folded = s.replace('İ', 'I').replace('ı', 'i')
+        val noDiacritics = java.text.Normalizer.normalize(folded, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+        return noDiacritics.lowercase(java.util.Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+    }
 
     private suspend fun findFilmPage(base: String, titles: List<String>, year: Int?): Document? {
         for (title in titles) {
             val q = URLEncoder.encode(title, "UTF-8").replace("+", "%20")
-            val results = runCatching { app.get("$base/arama/$q").document }.getOrNull() ?: continue
+            val results = runCatching { app.get("$base/arama/$q").document }
+                .onFailure { Log.e(TAG, "arama isteği hata ($title): $it") }
+                .getOrNull() ?: continue
+            Log.d(TAG, "arama '$title' -> ${results.select("li.film").size} sonuç")
             val cands = results.select("li.film").mapNotNull { li ->
                 val t = li.selectFirst("span.film-title")?.text() ?: return@mapNotNull null
                 val href = li.selectFirst("a")?.attr("href")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -92,6 +109,7 @@ object FourKHDHubDub {
                 val b = norm(title)
                 a.isNotEmpty() && (a == b || a.contains(b) || b.contains(a))
             }.take(5)
+            Log.d(TAG, "eşleşen adaylar=${cands.map { it.first }}")
 
             for ((_, url) in cands) {
                 val doc = runCatching { app.get(url).document }.getOrNull() ?: continue
@@ -173,13 +191,20 @@ object FourKHDHubDub {
     }
 
     private suspend fun extractTurkishAudio(rapidUrl: String, referer: String): DubAudio? {
-        val res = runCatching { app.get(rapidUrl, referer = referer) }.getOrNull() ?: return null
-        val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res.text)?.groupValues?.get(1) ?: return null
-        val cm = runCatching { JSONObject(decodeSecret(p8)).optString("cm") }.getOrNull()
-            ?.takeIf { it.startsWith("http") } ?: return null
+        val res = runCatching { app.get(rapidUrl, referer = referer) }
+            .onFailure { Log.e(TAG, "rapidvid sayfa hatası ($rapidUrl): $it") }
+            .getOrNull() ?: return null
+        val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res.text)?.groupValues?.get(1)
+        if (p8 == null) { Log.e(TAG, "_p8 yok ($rapidUrl), HTTP ${res.code}"); return null }
+        val cm = runCatching { JSONObject(decodeSecret(p8)).optString("cm") }
+            .onFailure { Log.e(TAG, "p8 çözme hatası: $it") }
+            .getOrNull()?.takeIf { it.startsWith("http") }
+        if (cm == null) { Log.e(TAG, "cm alanı yok"); return null }
 
-        val master = runCatching { app.get(cm, referer = RAPID_REFERER).text }.getOrNull() ?: return null
-        if (!master.trimStart().startsWith("#EXTM3U")) return null
+        val master = runCatching { app.get(cm, referer = RAPID_REFERER).text }
+            .onFailure { Log.e(TAG, "master isteği hata: $it") }
+            .getOrNull() ?: return null
+        if (!master.trimStart().startsWith("#EXTM3U")) { Log.e(TAG, "master HLS değil: ${master.take(80)}"); return null }
 
         // Önek (mq/m6/ma...) sabit varsayılmaz: her seferinde master'dan okunur.
         val line = master.lineSequence().firstOrNull {
