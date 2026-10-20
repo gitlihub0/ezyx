@@ -21,11 +21,13 @@ fun createHybridExtractorLink(
     sourceName: String,
     videoUrl: String,
     audioUrl: String,
-    quality: Int = Qualities.P2160.value
+    quality: Int = Qualities.P2160.value,
+    duration: String = "" // YENİ
 ): ExtractorLink {
+    val durationText = if (duration.isNotBlank()) " $duration" else ""
     return ExtractorLink(
         source = sourceName,
-        name = "$sourceName + TR Dublaj",
+        name = "$sourceName$durationText + TR Dublaj$durationText",
         url = buildVirtualM3u8(videoUrl, audioUrl),
         referer = "",
         quality = quality,
