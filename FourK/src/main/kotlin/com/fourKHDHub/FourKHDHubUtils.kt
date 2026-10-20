@@ -130,3 +130,65 @@ suspend fun loadSourceNameExtractor(
         }
     }
 }
+
+// ==========================================
+// FULLHDFILMİZLESENE TR SES BİRLEŞTİRİCİ
+// ==========================================
+object FullHDFilmMerger {
+    suspend fun getTurkishAudio(title: String): String? {
+        try {
+            // Filmin adını FullHDFilmizlesene formatına uygun hale getirip arıyoruz
+            val cleanTitle = title.replace(Regex("""\s+"""), "+")
+            val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$cleanTitle"
+            
+            val searchDoc = app.get(searchUrl).document
+            val movieUrl = searchDoc.selectFirst("li.film a")?.attr("href") ?: return null
+
+            val movieDoc = app.get(movieUrl).document
+            val html = movieDoc.html()
+
+            // Sitedeki RapidVid player linkini bul
+            val rapidVidUrl = Regex("""https?://[^\s"'<>]+\b(?:rapidvid)[^\s"'<>]+""").find(html)?.value
+            if (rapidVidUrl != null) {
+                val res = app.get(rapidVidUrl, referer = "https://www.fullhdfilmizlesene.now/").text
+                val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res)?.groupValues?.get(1)
+                
+                if (p8 != null) {
+                    val json = JSONObject(decodeSecret(p8))
+                    val cmUrl = json.optString("cm") // cm = ana M3U8 stream bağlantısı
+                    if (cmUrl.isNotBlank() && cmUrl.startsWith("http")) {
+                        Log.d("K_MERGER", "TR Ses M3U8 Bulundu: $cmUrl")
+                        return cmUrl
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("K_MERGER", "TR Ses çekilirken hata: $e")
+        }
+        return null
+    }
+
+    private fun decodeSecret(encodedString: String): String {
+        val reversedBase64Input = encodedString.reversed()
+        val tString = base64Decode(reversedBase64Input)
+        val oBuilder = StringBuilder()
+        val key = "K9L"
+        for (index in tString.indices) {
+            val offset = key[index % key.length].code % 5 + 1
+            oBuilder.append((tString[index].code - offset).toChar())
+        }
+        return base64Decode(oBuilder.toString())
+    }
+
+    fun buildMergedM3U8(videoUrl: String, audioUrl: String): String {
+        val m3u8 = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="tr-audio",NAME="Türkçe Dublaj",DEFAULT=YES,AUTOSELECT=YES,URI="$audioUrl"
+            #EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=3840x2160,AUDIO="tr-audio"
+            $videoUrl
+        """.trimIndent()
+        // ExoPlayer'ın okuyabilmesi için M3U8 metnini Base64 Data URI'ye çeviriyoruz
+        val b64 = Base64.encodeToString(m3u8.toByteArray(), Base64.NO_WRAP)
+        return "data:application/vnd.apple.mpegurl;base64,${b64.replace("\n", "")}"
+    }
+}
