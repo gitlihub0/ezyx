@@ -173,23 +173,34 @@ class HubCloud : ExtractorApi() {
         document.select("a.btn").amap { element ->
             val link  = element.attr("href")
             val label = element.ownText().lowercase()
+            
+            // Dil etiketini otomatik algılayıp ekleyelim (Türkçe Dublaj / Altyazı desteği)
+            val langTag = when {
+                label.contains("dublaj") || label.contains("tr") -> "[Türkçe Dublaj]"
+                label.contains("altyazı") || label.contains("sub") -> "[Türkçe Altyazılı]"
+                else -> ""
+            }
+
             when {
-                "fsl server"  in label -> callback(newExtractorLink("$ref [FSL Server]", "$ref [FSL Server] $labelExtras", link) { this.quality = quality })
-                "download file" in label -> callback(newExtractorLink(ref, "$ref $labelExtras", link) { this.quality = quality })
+                "fsl server"  in label -> callback(newExtractorLink("$ref [FSL Server]", "$ref [FSL Server] $labelExtras $langTag", link) { this.quality = quality })
+                "download file" in label -> callback(newExtractorLink(ref, "$ref $labelExtras $langTag", link) { this.quality = quality })
                 "buzzserver"  in label -> {
                     val resp  = app.get("$link/download", referer = link, allowRedirects = false)
                     val dlink = resp.headers["hx-redirect"] ?: resp.headers["HX-Redirect"].orEmpty()
-                    if (dlink.isNotBlank()) callback(newExtractorLink("$ref [BuzzServer]", "$ref [BuzzServer] $labelExtras", dlink) { this.quality = quality })
+                    if (dlink.isNotBlank()) callback(newExtractorLink("$ref [BuzzServer]", "$ref [BuzzServer] $labelExtras $langTag", dlink) { this.quality = quality })
                 }
                 "pixeldra" in label || "pixelserver" in label || "pixel server" in label || "pixeldrain" in label -> {
                     val base     = getBaseUrl(link)
                     val finalUrl = if ("download" in link) link else "$base/api/file/${link.substringAfterLast("/")}?download"
-                    callback(newExtractorLink("$ref Pixeldrain", "$ref Pixeldrain $labelExtras", finalUrl) { this.quality = quality })
+                    callback(newExtractorLink("$ref Pixeldrain", "$ref Pixeldrain $labelExtras $langTag", finalUrl) { this.quality = quality })
                 }
-                "s3 server" in label -> callback(newExtractorLink("$ref [S3 Server]", "$ref [S3 Server] $labelExtras", link) { this.quality = quality })
-                "fslv2"     in label -> callback(newExtractorLink("$ref [FSLv2]", "$ref [FSLv2] $labelExtras", link) { this.quality = quality })
-                "mega server" in label -> callback(newExtractorLink("$ref [Mega Server]", "$ref [Mega Server] $labelExtras", link) { this.quality = quality })
-                "pdl server" in label -> callback(newExtractorLink("$ref [PDL Server]", "$ref [PDL Server] $labelExtras", link) { this.quality = quality })
+                "s3 server" in label || "shop" in label -> callback(newExtractorLink("$ref [S3/Shop Akışı]", "$ref [S3/Shop Akışı] $labelExtras $langTag", link, ExtractorLinkType.M3U8) { 
+                    this.quality = quality
+                    this.referer = realUrl
+                })
+                "fslv2"     in label -> callback(newExtractorLink("$ref [FSLv2]", "$ref [FSLv2] $labelExtras $langTag", link) { this.quality = quality })
+                "mega server" in label -> callback(newExtractorLink("$ref [Mega Server]", "$ref [Mega Server] $labelExtras $langTag", link) { this.quality = quality })
+                "pdl server" in label -> callback(newExtractorLink("$ref [PDL Server]", "$ref [PDL Server] $labelExtras $langTag", link) { this.quality = quality })
                 else -> loadExtractor(link, "", subtitleCallback, callback)
             }
         }
