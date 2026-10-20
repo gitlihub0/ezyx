@@ -8,14 +8,10 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import com.lagradost.cloudstream3.toNewSearchResponseList
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
-import org.json.JSONArray
 import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.toNewSearchResponseList
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -230,12 +226,7 @@ class FourKHDHub : MainAPI() {
                     }
                 }
 
-                val epPayload1 = JSONObject().apply {
-                    put("links", JSONArray(hrefsList.distinct()))
-                    put("searchTitle", fixedTitle)
-                }.toString()
-
-                tvSeriesEpisodes += newEpisode(epPayload1) {
+                tvSeriesEpisodes += newEpisode(hrefsList.distinct()) {
                     this.season      = season
                     this.episode     = episode
                     this.name        = epName ?: "Episode $episode"
@@ -280,12 +271,7 @@ class FourKHDHub : MainAPI() {
                         }
                     }
 
-                    val epPayload2 = JSONObject().apply {
-                        put("links", JSONArray(hrefList.distinct()))
-                        put("searchTitle", fixedTitle)
-                    }.toString()
-
-                    tvSeriesEpisodes += newEpisode(epPayload2) {
+                    tvSeriesEpisodes += newEpisode(hrefList.distinct()) {
                         this.season      = season
                         this.episode     = nextEpisode
                         this.name        = epName ?: "S${season.toString().padStart(2, '0')} – $fileTitle [$quality, $size]".trim()
@@ -336,12 +322,7 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            val moviePayload = JSONObject().apply {
-                put("links", JSONArray(hrefs))
-                put("searchTitle", fixedTitle)
-            }.toString()
-
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, moviePayload) {
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -357,56 +338,19 @@ class FourKHDHub : MainAPI() {
         }
     }
 
-override suspend fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Yeni JSON formatından linkleri ve başlığı ayıkla
-        val (links, searchTitle) = try {
-            val json = JSONObject(data)
-            val arr = json.optJSONArray("links")
-            val parsedLinks = (0 until (arr?.length() ?: 0)).mapNotNull { arr?.optString(it) }
-            Pair(parsedLinks, json.optString("searchTitle"))
-        } catch (e: Exception) {
-            val fallbackLinks = try {
-                val arr = org.json.JSONArray(data)
-                (0 until arr.length()).mapNotNull { arr.optString(it, "") }
-            } catch (_: Exception) { listOf(data) }
-            Pair(fallbackLinks.filter { it.isNotBlank() }.distinct(), "")
-        }
-
+        val links = try {
+            val arr = org.json.JSONArray(data)
+            (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
+        } catch (_: Exception) {
+            listOf(data).filter { it.isNotBlank() }
+        }.filter { it.isNotBlank() }.distinct()
         if (links.isEmpty()) return false
-
-        // Arka planda TR Sesi bul (Eğer başlık iletildiyse)
-        var trAudioUrl: String? = null
-        if (searchTitle.isNotBlank()) {
-            trAudioUrl = FullHDFilmMerger.getTurkishAudio(searchTitle)
-        }
-
-        val interceptCallback: (ExtractorLink) -> Unit = { link ->
-            callback(link)
-
-            if (trAudioUrl != null) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    val isVideoM3u8 = link.type == ExtractorLinkType.M3U8
-                    val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, isVideoM3u8, trAudioUrl!!)
-                    
-                    callback(
-                        newExtractorLink(
-                            source = "${link.source} (TR Ses)",
-                            name = "${link.name} [TR Dublaj]",
-                            url = mergedUrl,
-                            type = ExtractorLinkType.M3U8
-                        ) {
-                            this.referer = link.referer
-                            this.quality = link.quality
-                        }
-                    )
-                }
-            }
-        }
 
         links.amap { raw ->
             val resolved = try {
@@ -419,9 +363,9 @@ override suspend fun loadLinks(
 
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, interceptCallback)
+                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
                 } else {
-                    loadExtractor(resolved, name, subtitleCallback, interceptCallback)
+                    loadExtractor(resolved, name, subtitleCallback, callback)
                 }
             } catch (e: Exception) {
                 Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
