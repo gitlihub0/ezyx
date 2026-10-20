@@ -314,7 +314,7 @@ class FourKHDHub : MainAPI() {
                 }.getOrNull()
             }
 
-            val movieCreditsJsonText = tmdbId?.let { id ->
+val movieCreditsJsonText = tmdbId?.let { id ->
                 runCatching {
                     app.get("${TMDBAPI}/movie/$id/credits?api_key=$TMDB_API_KEY&language=en-US").text
                 }.getOrNull()
@@ -322,7 +322,15 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
+            // LİNKLERİ, BAŞLIĞI VE YILI JSON OLARAK PAKETLİYORUZ (YENİ EKLENEN KISIM)
+            val loadDataJson = org.json.JSONObject().apply {
+                put("links", org.json.JSONArray(hrefs))
+                put("title", fixedTitle)
+                put("year", fixedYear ?: 0)
+            }.toString()
+
+            // DİKKAT: hrefs yerine loadDataJson kullanıyoruz
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, loadDataJson) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -338,28 +346,50 @@ class FourKHDHub : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val links = try {
-            val arr = org.json.JSONArray(data)
-            (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
+        var movieTitle = ""
+        var movieYear: Int? = null
+        val links = mutableListOf<String>()
+
+        // GELEN JSON VERİSİNİ ÇÖZÜMLÜYORUZ
+        try {
+            val json = org.json.JSONObject(data)
+            movieTitle = json.optString("title", "")
+            val yearOpt = json.optInt("year", 0)
+            if (yearOpt > 0) movieYear = yearOpt
+            
+            val arr = json.optJSONArray("links")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { links.add(it) }
+                }
+            }
         } catch (_: Exception) {
-            listOf(data).filter { it.isNotBlank() }
-        }.filter { it.isNotBlank() }.distinct()
+            try {
+                val arr = org.json.JSONArray(data)
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { links.add(it) }
+                }
+            } catch (_: Exception) {
+                if (data.isNotBlank()) links.add(data)
+            }
+        }
 
-        if (links.isEmpty()) return false
+        val distinctLinks = links.distinct()
+        if (distinctLinks.isEmpty()) return false
 
-        // Arka planda Türkçe sesi aramaya başla (Film adını ve yılını load sayfasından data içine paketleyebiliriz)
-        // Şimdilik başlığı data'dan veya statik bir yapıdan aldığımızı varsayalım
+        // DİNAMİK ARAMA: TIKLANAN FİLMİN ADI İLE ARIYORUZ (STATİK SPIDER MAN KISMI DEĞİŞTİ)
         val trAudioFetcher = FullHDFilmizleseneAudio()
-        // Not: Gerçek senaryoda movieTitle bilgisini load() fonksiyonundan buraya paslaman gerekir
-        val turkishAudioUrl = trAudioFetcher.getTurkishAudioLink("Spider Man", 2008) 
+        val turkishAudioUrl = if (movieTitle.isNotBlank()) {
+            trAudioFetcher.getTurkishAudioLink(movieTitle, movieYear)
+        } else null
 
-        links.amap { raw ->
+        distinctLinks.amap { raw ->
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
@@ -367,19 +397,17 @@ class FourKHDHub : MainAPI() {
             }
             if (resolved.isBlank()) return@amap
 
-            // Görüntü linkini çözen callback sarmalayıcısı
             val hybridCallback: (ExtractorLink) -> Unit = { originalLink ->
                 if (turkishAudioUrl != null) {
-                    // Sesi bulduysa Hybrid Link oluştur
                     val hybridLink = createHybridExtractorLink(
                         sourceName = originalLink.source,
                         videoUrl = originalLink.url,
                         audioUrl = turkishAudioUrl,
                         quality = originalLink.quality
                     )
-                callback.invoke(hybridLink) // Birleştirilmiş linki ekrana ver
+                    callback.invoke(hybridLink) 
                 }
-                callback.invoke(originalLink) // Ne olur ne olmaz, orijinal İngilizce 4K linkini de alta ekle
+                callback.invoke(originalLink)
             }
 
             try {
