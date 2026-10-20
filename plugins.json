@@ -44,14 +44,14 @@
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/FourK.cs3",
         "status": 1,
-        "version": 2,
+        "version": 1,
         "name": "FourK",
         "internalName": "FourK",
         "authors": [
             "MTS"
         ],
         "description": "Provider untuk -4-K-H-D-H-u-b-",
-        "fileSize": 65678,
+        "fileSize": 68291,
         "repositoryUrl": "https://github.com/gitlihub0/ezyx",
         "language": "tr",
         "tvTypes": [
@@ -60,7 +60,7 @@
         ],
         "iconUrl": "https://4khdhub.one/favicon.ico",
         "apiVersion": 1,
-        "fileHash": "sha256-9221486d6a03cfa6fc6d6e89eb9af10d4e1e68d5ac35363a9531e7f9e61b7c13"
+        "fileHash": "sha256-edbade65e5a1a9f258ddecfa6796c7b5d6e7408a00e131aa986c72b90f98928c"
     },
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/fullhdfilm.cs3",
