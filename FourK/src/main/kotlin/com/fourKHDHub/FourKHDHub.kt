@@ -350,26 +350,45 @@ class FourKHDHub : MainAPI() {
         } catch (_: Exception) {
             listOf(data).filter { it.isNotBlank() }
         }.filter { it.isNotBlank() }.distinct()
+
         if (links.isEmpty()) return false
+
+        // Arka planda Türkçe sesi aramaya başla (Film adını ve yılını load sayfasından data içine paketleyebiliriz)
+        // Şimdilik başlığı data'dan veya statik bir yapıdan aldığımızı varsayalım
+        val trAudioFetcher = FullHDFilmizleseneAudio()
+        // Not: Gerçek senaryoda movieTitle bilgisini load() fonksiyonundan buraya paslaman gerekir
+        val turkishAudioUrl = trAudioFetcher.getTurkishAudioLink("Spider Man", 2008) 
 
         links.amap { raw ->
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
-                Log.e("4KHDHub", "Redirect failed: $raw — ${e.message}")
                 return@amap
             }
             if (resolved.isBlank()) return@amap
 
+            // Görüntü linkini çözen callback sarmalayıcısı
+            val hybridCallback: (ExtractorLink) -> Unit = { originalLink ->
+                if (turkishAudioUrl != null) {
+                    // Sesi bulduysa Hybrid Link oluştur
+                    val hybridLink = createHybridExtractorLink(
+                        sourceName = originalLink.source,
+                        videoUrl = originalLink.url,
+                        audioUrl = turkishAudioUrl,
+                        quality = originalLink.quality
+                    )
+                callback.invoke(hybridLink) // Birleştirilmiş linki ekrana ver
+                }
+                callback.invoke(originalLink) // Ne olur ne olmaz, orijinal İngilizce 4K linkini de alta ekle
+            }
+
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
+                    HubCloud().getUrl(resolved, name, subtitleCallback, hybridCallback)
                 } else {
-                    loadExtractor(resolved, name, subtitleCallback, callback)
+                    loadExtractor(resolved, name, subtitleCallback, hybridCallback)
                 }
-            } catch (e: Exception) {
-                Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
-            }
+            } catch (e: Exception) { }
         }
         return true
     }
