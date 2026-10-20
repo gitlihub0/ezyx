@@ -374,6 +374,8 @@ class FourKHDHub : MainAPI() {
         // 4K linkleri önce toplanır; dublaj aramasıyla paralel çalışır.
         val collected = ConcurrentLinkedQueue<ExtractorLink>()
 
+        Log.d("4KHDHub", "loadLinks: tmdbId=$tmdbId, ham link sayısı=${links.size}")
+
         val dub: DubAudio? = coroutineScope {
             val dubJob = async {
                 if (tmdbId == null) null
