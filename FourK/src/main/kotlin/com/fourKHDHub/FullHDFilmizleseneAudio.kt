@@ -4,8 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 class FullHDFilmizleseneAudio {
     private val mainUrl = "https://www.fullhdfilmizlesene.now"
@@ -41,32 +39,31 @@ class FullHDFilmizleseneAudio {
     }
 
     private suspend fun extractProperAudioLink(iframeUrl: String): String? {
-        return suspendCoroutine { continuation ->
-            var linkFound = false
-            try {
-                // Not: RapidVid ve benzeri siteler için Extractor'ı tetikliyoruz
-                // loadExtractor arka planda asenkron çalışır, callback ile sonucu verir.
-                loadExtractor(iframeUrl, mainUrl, subtitleCallback = { _ -> }) { link ->
-                    if (!linkFound && link.url.isNotBlank()) {
-                        linkFound = true
-                        continuation.resume(link.url)
-                    }
-                }
-                
-                // Eğer saniye bazlı bir zaman aşımı eklemek istersen coroutines withTimeout kullanabilirsin
-                // Şimdilik Extractor listesinde bulunamazsa doğrudan regex denemesi yapalım
-            } catch (e: Exception) {
-                // Extractor çökmesi durumunda manuel yedek regex (eski yöntem)
-                if (!linkFound) {
-                    try {
-                        val res = app.get(iframeUrl, referer = "$mainUrl/").text
-                        val backupLink = Regex("""file["']?\s*:\s*["']([^"']+)["']""").find(res)?.groupValues?.get(1)?.replace("\\", "")
-                        continuation.resume(backupLink)
-                    } catch (e2: Exception) {
-                        continuation.resume(null)
-                    }
+        var foundLink: String? = null
+        
+        try {
+            // loadExtractor asenkron çalışır ve bulunan linkleri callback ile döndürür
+            loadExtractor(iframeUrl, mainUrl, subtitleCallback = { _ -> }) { link ->
+                // Sadece ilk bulduğu ve boş olmayan linki kaydediyoruz
+                if (foundLink == null && link.url.isNotBlank()) {
+                    foundLink = link.url
                 }
             }
+            
+            // Link başarıyla çözüldüyse geri döndür
+            if (foundLink != null) {
+                return foundLink
+            }
+        } catch (e: Exception) {
+            // Extractor çökürse uygulamayı kapatma, aşağıdaki yedek (manuel) sisteme geç
+        }
+
+        // Yedek Yöntem: Şifresiz/basit m3u8 sunan alternatif bir player gelirse Regex ile yakala
+        return try {
+            val res = app.get(iframeUrl, referer = "$mainUrl/").text
+            Regex("""file["']?\s*:\s*["']([^"']+)["']""").find(res)?.groupValues?.get(1)?.replace("\\", "")
+        } catch (e2: Exception) {
+            null
         }
     }
 }
