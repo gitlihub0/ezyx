@@ -8,10 +8,8 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.jsoup.nodes.Element
-import com.lagradost.cloudstream3.toNewSearchResponseList
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -118,6 +116,7 @@ class FourKHDHub : MainAPI() {
         var tmdbPoster:   String?         = null
         var tmdbBackdrop: String?         = null
         var tmdbActors:   List<ActorData> = emptyList()
+        var tmdbRuntimeStr = "" // SÜRE BİLGİSİ İÇİN YENİ EKLENDİ
 
         if (tmdbId != null) {
             val type     = if (isMovie) "movie" else "tv"
@@ -128,6 +127,15 @@ class FourKHDHub : MainAPI() {
             if (tmdbJson != null) {
                 tmdbTitle    = tmdbJson.optString("title").ifBlank { tmdbJson.optString("name").ifBlank { null } }
                 tmdbOverview = tmdbJson.optString("overview").takeIf { it.isNotBlank() }
+                
+                // TMDB'DEN SÜREYİ HESAPLAYIP [02:15:00] FORMATINA ÇEVİRİYORUZ
+                val runtime = tmdbJson.optInt("runtime", 0)
+                if (runtime > 0) {
+                    val h = runtime / 60
+                    val m = runtime % 60
+                    tmdbRuntimeStr = String.format("[%02d:%02d:00]", h, m)
+                }
+
                 val date     = tmdbJson.optString("release_date").ifBlank { tmdbJson.optString("first_air_date") }
                 tmdbYear     = date.takeIf { it.isNotBlank() }?.substringBefore("-")?.toIntOrNull()
                 tmdbRating   = tmdbJson.optDouble("vote_average").takeIf { it != 0.0 }
@@ -314,7 +322,7 @@ class FourKHDHub : MainAPI() {
                 }.getOrNull()
             }
 
-val movieCreditsJsonText = tmdbId?.let { id ->
+            val movieCreditsJsonText = tmdbId?.let { id ->
                 runCatching {
                     app.get("${TMDBAPI}/movie/$id/credits?api_key=$TMDB_API_KEY&language=en-US").text
                 }.getOrNull()
@@ -322,14 +330,15 @@ val movieCreditsJsonText = tmdbId?.let { id ->
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            // LİNKLERİ, BAŞLIĞI VE YILI JSON OLARAK PAKETLİYORUZ (YENİ EKLENEN KISIM)
+            // LİNKLERİ, BAŞLIĞI, YILI VE SÜREYİ JSON OLARAK PAKETLİYORUZ
             val loadDataJson = org.json.JSONObject().apply {
                 put("links", org.json.JSONArray(hrefs))
                 put("title", fixedTitle)
                 put("year", fixedYear ?: 0)
+                put("duration", tmdbRuntimeStr)
             }.toString()
 
-            // DİKKAT: hrefs yerine loadDataJson kullanıyoruz
+            // hrefs YERİNE loadDataJson GÖNDERİYORUZ
             newMovieLoadResponse(fixedTitle, url, TvType.Movie, loadDataJson) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
@@ -346,13 +355,14 @@ val movieCreditsJsonText = tmdbId?.let { id ->
         }
     }
 
-override suspend fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var movieTitle = ""
+        var movieDuration = ""
         var movieYear: Int? = null
         val links = mutableListOf<String>()
 
@@ -360,6 +370,7 @@ override suspend fun loadLinks(
         try {
             val json = org.json.JSONObject(data)
             movieTitle = json.optString("title", "")
+            movieDuration = json.optString("duration", "")
             val yearOpt = json.optInt("year", 0)
             if (yearOpt > 0) movieYear = yearOpt
             
@@ -383,7 +394,7 @@ override suspend fun loadLinks(
         val distinctLinks = links.distinct()
         if (distinctLinks.isEmpty()) return false
 
-        // DİNAMİK ARAMA: TIKLANAN FİLMİN ADI İLE ARIYORUZ (STATİK SPIDER MAN KISMI DEĞİŞTİ)
+        // DİNAMİK ARAMA YAPIYORUZ
         val trAudioFetcher = FullHDFilmizleseneAudio()
         val turkishAudioUrl = if (movieTitle.isNotBlank()) {
             trAudioFetcher.getTurkishAudioLink(movieTitle, movieYear)
@@ -398,16 +409,35 @@ override suspend fun loadLinks(
             if (resolved.isBlank()) return@amap
 
             val hybridCallback: (ExtractorLink) -> Unit = { originalLink ->
+                // Orijinal İngilizce linkin başlığına süreyi ekle
+                val originalNameWithDuration = if (movieDuration.isNotBlank() && !originalLink.name.contains(movieDuration)) {
+                    "${originalLink.name} $movieDuration"
+                } else originalLink.name
+
                 if (turkishAudioUrl != null) {
                     val hybridLink = createHybridExtractorLink(
                         sourceName = originalLink.source,
                         videoUrl = originalLink.url,
                         audioUrl = turkishAudioUrl,
-                        quality = originalLink.quality
+                        quality = originalLink.quality,
+                        duration = movieDuration
                     )
                     callback.invoke(hybridLink) 
                 }
-                callback.invoke(originalLink)
+                
+                // Orijinal İngilizce torrent linkini yeni ismiyle ekliyoruz
+                callback.invoke(
+                    ExtractorLink(
+                        source = originalLink.source,
+                        name = originalNameWithDuration,
+                        url = originalLink.url,
+                        referer = originalLink.referer,
+                        quality = originalLink.quality,
+                        type = originalLink.type,
+                        headers = originalLink.headers,
+                        extractorData = originalLink.extractorData
+                    )
+                )
             }
 
             try {
