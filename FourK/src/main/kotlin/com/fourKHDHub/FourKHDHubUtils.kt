@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import org.json.JSONArray
 import java.net.URLEncoder
 import java.text.Normalizer
 
@@ -135,20 +136,113 @@ suspend fun loadSourceNameExtractor(
 // FULLHDFILMİZLESENE TR SES BİRLEŞTİRİCİ
 // ==========================================
 object FullHDFilmMerger {
+
+    private fun atob(s: String): String = String(Base64.decode(s, Base64.DEFAULT), Charsets.UTF_8)
+
+    private fun rtt(s: String): String {
+        return s.map { c ->
+            when (c) {
+                in 'a'..'z' -> ((c - 'a' + 13) % 26 + 'a'.code).toChar()
+                in 'A'..'Z' -> ((c - 'A' + 13) % 26 + 'A'.code).toChar()
+                else -> c
+            }
+        }.joinToString("")
+    }
+
+    private fun smartDecodeLink(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("//")) {
+            return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+        }
+        try {
+            val rotDecoded = atob(rtt(trimmed)).trim()
+            if (rotDecoded.startsWith("http") || rotDecoded.startsWith("//")) return if (rotDecoded.startsWith("//")) "https:$rotDecoded" else rotDecoded
+        } catch (_: Exception) { }
+
+        try {
+            val b64Decoded = atob(trimmed).trim()
+            if (b64Decoded.startsWith("http") || b64Decoded.startsWith("//")) return if (b64Decoded.startsWith("//")) "https:$b64Decoded" else b64Decoded
+        } catch (_: Exception) { }
+
+        try {
+            val revDecoded = atob(trimmed.reversed()).trim()
+            if (revDecoded.startsWith("http") || revDecoded.startsWith("//")) return if (revDecoded.startsWith("//")) "https:$revDecoded" else revDecoded
+        } catch (_: Exception) { }
+
+        return null
+    }
+
+    private fun collectStringsRecursiveJSON(prefix: String, node: Any?, out: MutableList<Pair<String, String>>) {
+        when (node) {
+            is String -> out.add(Pair(prefix, node))
+            is JSONArray -> {
+                for (i in 0 until node.length()) {
+                    collectStringsRecursiveJSON(prefix, node.opt(i), out)
+                }
+            }
+            is JSONObject -> {
+                val keys = node.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    if (k == "tt" || k == "order") continue
+                    val nextPrefix = if (k == "sx" || k == "t" || k == "p" || k.isBlank()) {
+                        prefix
+                    } else {
+                        if (prefix.isBlank()) k else "${prefix}_$k"
+                    }
+                    collectStringsRecursiveJSON(nextPrefix, node.opt(k), out)
+                }
+            }
+        }
+    }
+
     suspend fun getTurkishAudio(title: String): String? {
         try {
-            // Filmin adını FullHDFilmizlesene formatına uygun hale getirip arıyoruz
-            val cleanTitle = title.replace(Regex("""\s+"""), "+")
+            // Başlıktaki yılı vs. temizle ki arama daha isabetli olsun (Örn: Spider-Man (2025) -> Spider-Man)
+            val cleanTitle = title.replace(Regex("""\(\d{4}\)"""), "").trim().replace(Regex("""\s+"""), "+")
             val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$cleanTitle"
             
             val searchDoc = app.get(searchUrl).document
-            val movieUrl = searchDoc.selectFirst("li.film a")?.attr("href") ?: return null
+            val moviePath = searchDoc.selectFirst("li.film a")?.attr("href") ?: return null
+            val movieUrl = if (moviePath.startsWith("http")) moviePath else "https://www.fullhdfilmizlesene.now$moviePath"
 
             val movieDoc = app.get(movieUrl).document
-            val html = movieDoc.html()
 
-            // Sitedeki RapidVid player linkini bul
-            val rapidVidUrl = Regex("""https?://[^\s"'<>]+\b(?:rapidvid)[^\s"'<>]+""").find(html)?.value
+            // "scx" JSON değişkeninden şifreli linkleri ayıkla
+            val scripts = movieDoc.select("script").map { it.data() }
+            val rawCandidates = mutableListOf<Pair<String, String>>()
+
+            for (script in scripts) {
+                if (!script.contains("scx")) continue
+                val scxJsonString = Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
+                    .find(script)?.groupValues?.get(1) ?: continue
+                try {
+                    val scxObj = JSONObject(scxJsonString)
+                    val keys = scxObj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        collectStringsRecursiveJSON(k, scxObj.opt(k), rawCandidates)
+                    }
+                } catch (e: Exception) {
+                    Log.e("K_MERGER", "SCX okuma hatası: $e")
+                }
+            }
+
+            var rapidVidUrl: String? = null
+            
+            // ÖNCELİK: İçinde "tr" (Türkçe Dublaj) geçen etiketleri (parçaları) filtrele!
+            val trCandidates = rawCandidates.filter { it.first.contains("tr", ignoreCase = true) }
+            val searchList = trCandidates.ifEmpty { rawCandidates }
+
+            for ((label, candidate) in searchList) {
+                val decoded = smartDecodeLink(candidate)
+                if (decoded != null && decoded.contains("rapidvid")) {
+                    Log.d("K_MERGER", "Seçilen RapidVid URL ($label): $decoded")
+                    rapidVidUrl = decoded
+                    break
+                }
+            }
+
             if (rapidVidUrl != null) {
                 val res = app.get(rapidVidUrl, referer = "https://www.fullhdfilmizlesene.now/").text
                 val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res)?.groupValues?.get(1)
@@ -157,7 +251,7 @@ object FullHDFilmMerger {
                     val json = JSONObject(decodeSecret(p8))
                     val cmUrl = json.optString("cm") // cm = ana M3U8 stream bağlantısı
                     if (cmUrl.isNotBlank() && cmUrl.startsWith("http")) {
-                        Log.d("K_MERGER", "TR Ses M3U8 Bulundu: $cmUrl")
+                        Log.d("K_MERGER", "TR Ses M3U8 (cm) Bulundu: $cmUrl")
                         return cmUrl
                     }
                 }
