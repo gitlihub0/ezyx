@@ -357,7 +357,7 @@ class FourKHDHub : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -370,7 +370,6 @@ class FourKHDHub : MainAPI() {
             val parsedLinks = (0 until (arr?.length() ?: 0)).mapNotNull { arr?.optString(it) }
             Pair(parsedLinks, json.optString("searchTitle"))
         } catch (e: Exception) {
-            // Eski önbellek (cache) verisi varsa geriye dönük uyumluluk
             val fallbackLinks = try {
                 val arr = org.json.JSONArray(data)
                 (0 until arr.length()).mapNotNull { arr.optString(it, "") }
@@ -386,16 +385,14 @@ class FourKHDHub : MainAPI() {
             trAudioUrl = FullHDFilmMerger.getTurkishAudio(searchTitle)
         }
 
-        // ExtractorLink sonuçlarını yakalayıp sesi enjekte edeceğimiz özel callback
         val interceptCallback: (ExtractorLink) -> Unit = { link ->
-            // Her halükarda orijinal 4K (sadece orijinal sesli) linki göster
             callback(link)
 
-            // Eğer Türkçe ses bulduysak, yeni bir link oluşturarak listeye (TR Dublaj) etiketiyle ekle
             if (trAudioUrl != null) {
-                // Coroutine sarmalayıcısı: 'newExtractorLink' asenkron çağrısını sarmalar.
                 CoroutineScope(Dispatchers.IO).launch {
-                    val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, trAudioUrl!!)
+                    val isVideoM3u8 = link.type == ExtractorLinkType.M3U8
+                    val mergedUrl = FullHDFilmMerger.buildMergedM3U8(link.url, isVideoM3u8, trAudioUrl!!)
+                    
                     callback(
                         newExtractorLink(
                             source = "${link.source} (TR Ses)",
