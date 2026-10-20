@@ -411,6 +411,7 @@ class FourKHDHub : MainAPI() {
         val dubAudioFile = dub?.let { runCatching { it.toAudioFile() }.getOrNull() }
         for (link in collected) {
             if (dubAudioFile != null && link.type != ExtractorLinkType.M3U8) {
+                callback(link) // sessiz/orijinal sürüm de kalsın: hatanın videodan mı sesten mi geldiğini ayırmak için
                 callback(
                     newExtractorLink(link.source, "${link.name} + TR Dublaj", link.url) {
                         this.type          = link.type
