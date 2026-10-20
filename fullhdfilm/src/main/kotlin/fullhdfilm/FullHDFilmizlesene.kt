@@ -329,6 +329,7 @@ class FullHDFilmizlesene : MainAPI() {
         var successCount = 0
         for ((key, videoUrl) in videoLinks) {
             val fixedUrl = fixUrlNull(videoUrl) ?: continue
+            if (fixedUrl.contains("youtube") || fixedUrl.contains("youtu.be")) continue
             Log.d("K_FHD", "İşlenen URL ($key): $fixedUrl")
 
             // Her link ayrı try/catch: biri patlarsa diğerleri denenmeye devam eder
