@@ -51,7 +51,7 @@
             "qwert"
         ],
         "description": "FullHDFilmizlesene",
-        "fileSize": 62189,
+        "fileSize": 62435,
         "repositoryUrl": "https://github.com/gitlihub0/ezyx",
         "language": "tr",
         "tvTypes": [
@@ -59,7 +59,7 @@
         ],
         "iconUrl": "https://www.fullhdfilmizlesene.now/android-chrome-192x192.png",
         "apiVersion": 1,
-        "fileHash": "sha256-a682972af763a29020de825b462066927a7af1bf232d7dde07547dc2ab01471e"
+        "fileHash": "sha256-db6b8b2bf85f3795602ad65cf3109d42adb5cfa8424997348c6926377488e17f"
     },
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/TvDiziler.cs3",
