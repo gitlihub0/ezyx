@@ -1,350 +1,273 @@
 package com.fourKHDHub
 
-import android.util.Base64
 import com.lagradost.api.Log
-import com.lagradost.cloudstream3.Actor
-import com.lagradost.cloudstream3.ActorData
-import com.lagradost.cloudstream3.Score
-import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.base64Decode
+import com.lagradost.cloudstream3.extractors.PixelDrain
+import com.lagradost.cloudstream3.extractors.VidHidePro
+import com.lagradost.cloudstream3.extractors.VidStack
+import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.INFER_TYPE
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import org.json.JSONObject
-import org.json.JSONArray
-import java.net.URLEncoder
-import java.text.Normalizer
+import java.net.URI
 
-private val REDIRECT_REGEX = Regex("s\\('o','([A-Za-z0-9+/=]+)'|ck\\('_wp_http_\\d+','([^']+)'")
 
-suspend fun getRedirectLinks(url: String): String {
-    val html = runCatching { app.get(url).text }.getOrElse {
-        Log.e("4KHDHub", "Failed redirect page: ${it.message}")
-        return ""
-    }
+class HdStream4u : VidHidePro() {
+    override var mainUrl = "https://hdstream4u.*"
+}
 
-    val combined = StringBuilder(128)
-    for (m in REDIRECT_REGEX.findAll(html)) {
-        m.groups[1]?.value?.let(combined::append) ?: m.groups[2]?.value?.let(combined::append)
-    }
-    if (combined.isEmpty()) return ""
+class Hubstream : VidStack() {
+    override var mainUrl = "https://hubstream.*"
+}
 
-    return runCatching {
-        val decoded = base64Decode(pen(base64Decode(base64Decode(combined.toString()))))
-        val json    = JSONObject(decoded)
-        val encodedUrl = base64Decode(json.optString("o"))
-        if (encodedUrl.isNotBlank()) return@runCatching encodedUrl.trim()
+class Hubstreamdad : Hblinks() {
+    override var mainUrl = "https://hblinks.*"
+}
 
-        val data = encode(json.optString("data"))
-        val wp   = json.optString("blog_url")
-        if (wp.isBlank() || data.isBlank()) return@runCatching ""
-        app.get("$wp?re=$data").document.text().trim()
-    }.getOrElse {
-        Log.e("4KHDHub", "Redirect processing error: ${it.message}")
-        url
+open class Hblinks : ExtractorApi() {
+    override val name         = "Hblinks"
+    override val mainUrl      = "https://hblinks.*"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val elements = runCatching {
+            app.get(url).document.select("h3 a, h5 a, div.entry-content p a")
+        }.getOrElse {
+            Log.e(name, "Failed to load page: ${it.message}")
+            return
+        }
+
+        elements.amap { el ->
+            val href  = el.absUrl("href").ifBlank { el.attr("href") }.trim()
+            if (href.isEmpty()) return@amap
+            val lower = href.lowercase()
+            when {
+                "hubdrive" in lower  -> Hubdrive().getUrl(href, name, subtitleCallback, callback)
+                "hubcloud" in lower  -> HubCloud().getUrl(href, name, subtitleCallback, callback)
+                "hubcdn"   in lower  -> HUBCDN().getUrl(href, name, subtitleCallback, callback)
+                else -> loadSourceNameExtractor(name, href, "", Qualities.Unknown.value, subtitleCallback, callback)
+            }
+        }
     }
 }
 
-fun encode(value: String): String =
-    if (value.isEmpty()) "" else String(Base64.decode(value, Base64.DEFAULT))
 
-fun pen(value: String): String {
-    val out = StringBuilder(value.length)
-    for (c in value) {
-        out.append(
-            when (c) {
-                in 'A'..'Z' -> ((c - 'A' + 13) % 26 + 'A'.code).toChar()
-                in 'a'..'z' -> ((c - 'a' + 13) % 26 + 'a'.code).toChar()
-                else        -> c
+class Hubcdnn : ExtractorApi() {
+    override val name            = "Hubcdn"
+    override val mainUrl         = "https://hubcdn.*"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val html = runCatching {
+            app.get(url).document.toString()
+        }.getOrElse {
+            Log.e(name, "Failed to load page: ${it.message}")
+            return
+        }
+
+        val encoded = Regex("r=([A-Za-z0-9+/=]+)")
+            .find(html)?.groupValues?.getOrNull(1).orEmpty()
+
+        if (encoded.isEmpty()) {
+            Log.e(name, "Encoded URL not found")
+            return
+        }
+
+        val m3u8 = runCatching {
+            base64Decode(encoded).substringAfterLast("link=")
+        }.getOrElse {
+            Log.e(name, "Failed to decode base64")
+            return
+        }
+
+        callback(
+            newExtractorLink(name, name, m3u8, ExtractorLinkType.M3U8) {
+                this.referer = url
+                this.quality = Qualities.Unknown.value
             }
         )
     }
-    return out.toString()
 }
 
-suspend fun fetchtmdb(title: String, isMovie: Boolean): Int? {
-    val url     = "${FourKHDHub.TMDBAPI}/search/multi?api_key=${FourKHDHub.TMDB_API_KEY}&query=" + URLEncoder.encode(title.trim(), "UTF-8")
-    val json    = JSONObject(app.get(url).text)
-    val results = json.optJSONArray("results") ?: return null
 
-    val targetType = if (isMovie) "movie" else "tv"
-    fun normalize(s: String?): String = s?.lowercase()?.replace("[^a-z0-9]".toRegex(), "")?.trim() ?: ""
-
-    val inputNorm = normalize(title)
-    var fallback: Int? = null
-
-    for (i in 0 until results.length()) {
-        val item       = results.optJSONObject(i) ?: continue
-        if (item.optString("media_type") != targetType) continue
-        val resultTitle = if (isMovie) item.optString("title") else item.optString("name")
-        val resultNorm  = normalize(resultTitle)
-        if (resultNorm.isEmpty()) continue
-        if (fallback == null) fallback = item.optInt("id")
-        if (resultNorm == inputNorm || resultNorm.contains(inputNorm) || inputNorm.contains(resultNorm))
-            return item.optInt("id")
-    }
-    return fallback
+class PixelDrainDev : PixelDrain() {
+    override var mainUrl = "https://pixeldrain.dev"
 }
 
-fun parseCredits(jsonText: String?): List<ActorData> {
-    if (jsonText.isNullOrBlank()) return emptyList()
-    val list     = ArrayList<ActorData>()
-    val root     = JSONObject(jsonText)
-    val castArr  = root.optJSONArray("cast") ?: return list
-    for (i in 0 until castArr.length()) {
-        val c         = castArr.optJSONObject(i) ?: continue
-        val name      = c.optString("name").takeIf { it.isNotBlank() } ?: c.optString("original_name").orEmpty()
-        val profile   = c.optString("profile_path").takeIf { it.isNotBlank() }?.let { "${FourKHDHub.TMDBIMAGEBASEURL}$it" }
-        val character = c.optString("character").takeIf { it.isNotBlank() }
-        list += ActorData(Actor(name, profile), roleString = character)
-    }
-    return list
-}
+class Hubdrive : ExtractorApi() {
+    override val name            = "Hubdrive"
+    override val mainUrl         = "https://hubdrive.space"
+    override val requiresReferer = false
 
-fun safeScoreFrom10(value: Double?): Score? =
-    value?.takeIf { !it.isNaN() && it > 0.0 }?.let { Score.from10(it) }
-
-suspend fun loadSourceNameExtractor(
-    source: String,
-    url: String,
-    referer: String? = null,
-    quality: Int? = null,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit,
-) {
-    loadExtractor(url, referer, subtitleCallback) { link ->
-        CoroutineScope(Dispatchers.IO).launch {
-            callback.invoke(
-                newExtractorLink("${link.source} $source", "${link.source} $source", link.url) {
-                    this.quality       = quality ?: link.quality
-                    this.type          = link.type
-                    this.referer       = link.referer
-                    this.headers       = link.headers
-                    this.extractorData = link.extractorData
-                }
-            )
-        }
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val href = app.get(url, timeout = 5000L).document
+            .select(".btn.btn-primary.btn-user.btn-success1.m-1").attr("href")
+        if (href.contains("hubcloud", ignoreCase = true))
+            HubCloud().getUrl(href, "HubDrive", subtitleCallback, callback)
+        else
+            loadExtractor(href, "HubDrive", subtitleCallback, callback)
     }
 }
 
-// ==========================================
-// FULLHDFILMİZLESENE TR SES BİRLEŞTİRİCİ
-// ==========================================
-object FullHDFilmMerger {
-    
-    private fun atob(s: String): String = String(Base64.decode(s, Base64.DEFAULT), Charsets.UTF_8)
-    
-    private fun rtt(s: String): String {
-        return s.map { c ->
-            when (c) {
-                in 'a'..'z' -> ((c - 'a' + 13) % 26 + 'a'.code).toChar()
-                in 'A'..'Z' -> ((c - 'A' + 13) % 26 + 'A'.code).toChar()
-                else -> c
-            }
-        }.joinToString("")
-    }
 
-    private fun smartDecodeLink(raw: String): String? {
-        val trimmed = raw.trim()
-        if (trimmed.contains("rapidvid.org") || trimmed.contains("turkeyplayer")) return trimmed
-        
-        fun extract(s: String): String? {
-            val url = Regex("""(https?:)?//[^\s"'<>]+(?:rapidvid|turkeyplayer)[^\s"'<>]+""").find(s)?.value
-            if (url != null) {
-                return if (url.startsWith("//")) "https:$url" else url
+class HubCloud : ExtractorApi() {
+    override val name            = "Hub-Cloud"
+    override var mainUrl: String = "https://hubcloud.foo"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val tag    = "HubCloud"
+        val ref    = referer.orEmpty()
+        val uri    = runCatching { URI(url) }.getOrElse { Log.e(tag, "Invalid URL"); return }
+        val realUrl = uri.toString()
+        val baseUrl = "${uri.scheme}://${uri.host}"
+
+        val href = runCatching {
+            if ("hubcloud.php" in realUrl) {
+                realUrl
+            } else {
+                val raw = app.get(realUrl).document.selectFirst("#download")?.attr("href").orEmpty()
+                if (raw.startsWith("http", true)) raw
+                else baseUrl.trimEnd('/') + "/" + raw.trimStart('/')
             }
-            return null
+        }.getOrElse { Log.e(tag, "Failed to extract href: ${it.message}"); "" }
+
+        if (href.isBlank()) return
+
+        val document     = app.get(href).document
+        val size         = document.selectFirst("i#size")?.text().orEmpty()
+        val header       = document.selectFirst("div.card-header")?.text().orEmpty()
+        val headerDetails = cleanTitle(header)
+        val quality      = getIndexQuality(header)
+        val labelExtras  = buildString {
+            if (headerDetails.isNotEmpty()) append("[$headerDetails]")
+            if (size.isNotEmpty()) append("[$size]")
         }
-        
-        try { extract(atob(rtt(trimmed)))?.let { return it } } catch (_: Exception) {}
-        try { extract(atob(trimmed))?.let { return it } } catch (_: Exception) {}
-        
-        return null
-    }
 
-    suspend fun getTurkishAudio(title: String): String? {
-        try {
-            val cleanTitle = title.replace(Regex("""\(\d{4}\)"""), "").trim().replace(Regex("""\s+"""), "+")
-            val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$cleanTitle"
+        document.select("a.btn").amap { element ->
+            val link  = element.attr("href")
+            val label = element.ownText().lowercase()
             
-            val searchDoc = app.get(searchUrl).document
-            val moviePath = searchDoc.selectFirst("li.film a")?.attr("href") ?: return null
-            val movieUrl = if (moviePath.startsWith("http")) moviePath else "https://www.fullhdfilmizlesene.now$moviePath"
+            // Dil etiketini otomatik algılayıp ekleyelim (Türkçe Dublaj / Altyazı desteği)
+            val langTag = when {
+                label.contains("dublaj") || label.contains("tr") -> "[Türkçe Dublaj]"
+                label.contains("altyazı") || label.contains("sub") -> "[Türkçe Altyazılı]"
+                else -> ""
+            }
 
-            val movieDoc = app.get(movieUrl).document
-            val rawCandidates = mutableListOf<String>()
-
-            movieDoc.select("[data-code]").forEach { rawCandidates.add(it.attr("data-code")) }
-            
-            movieDoc.select("script").forEach {
-                val scxJsonString = Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL).find(it.data())?.groupValues?.get(1)
-                if (scxJsonString != null) {
-                    Regex("""["']([^"']+)["']""").findAll(scxJsonString).forEach { match ->
-                        rawCandidates.add(match.groupValues[1])
-                    }
+            when {
+                "fsl server"  in label -> callback(newExtractorLink("$ref [FSL Server]", "$ref [FSL Server] $labelExtras $langTag", link) { this.quality = quality })
+                "download file" in label -> callback(newExtractorLink(ref, "$ref $labelExtras $langTag", link) { this.quality = quality })
+                "buzzserver"  in label -> {
+                    val resp  = app.get("$link/download", referer = link, allowRedirects = false)
+                    val dlink = resp.headers["hx-redirect"] ?: resp.headers["HX-Redirect"].orEmpty()
+                    if (dlink.isNotBlank()) callback(newExtractorLink("$ref [BuzzServer]", "$ref [BuzzServer] $labelExtras $langTag", dlink) { this.quality = quality })
                 }
-            }
-
-            movieDoc.select("iframe").forEach { rawCandidates.add(it.attr("data-src").ifBlank { it.attr("src") }) }
-
-            var masterM3u8: String? = null
-            var targetReferer = "https://www.fullhdfilmizlesene.now/"
-            
-            for (candidate in rawCandidates) {
-                if (candidate.isBlank()) continue
-                val decoded = smartDecodeLink(candidate) ?: candidate
-                
-                if (decoded.contains("rapidvid")) {
-                    val res = app.get(decoded, referer = targetReferer).text
-                    val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(res)?.groupValues?.get(1)
-                    if (p8 != null) {
-                        val json = JSONObject(decodeSecret(p8))
-                        val cmUrl = json.optString("cm")
-                        if (cmUrl.isNotBlank() && cmUrl.startsWith("http")) {
-                            masterM3u8 = cmUrl
-                            targetReferer = "https://rapidvid.org/"
-                            break
-                        }
-                    }
-                } else if (decoded.contains("turkeyplayer")) {
-                    val res = app.get(decoded, referer = targetReferer).text
-                    val videoJsonRaw = Regex("""var\s+video\s*=\s*(\{.*?\});""", RegexOption.DOT_MATCHES_ALL).find(res)?.groupValues?.get(1)
-                    if (videoJsonRaw != null) {
-                        val vd = JSONObject(videoJsonRaw)
-                        val md5 = vd.optString("md5")
-                        val id = vd.optString("id")
-                        if (md5.isNotBlank()) {
-                            masterM3u8 = "https://watch.turkeyplayer.com/m3u8/8/$md5/master.txt?s=1&id=$id&cache=1"
-                            targetReferer = "https://watch.turkeyplayer.com/"
-                            break
-                        }
-                    }
+                "pixeldra" in label || "pixelserver" in label || "pixel server" in label || "pixeldrain" in label -> {
+                    val base     = getBaseUrl(link)
+                    val finalUrl = if ("download" in link) link else "$base/api/file/${link.substringAfterLast("/")}?download"
+                    callback(newExtractorLink("$ref Pixeldrain", "$ref Pixeldrain $labelExtras $langTag", finalUrl) { this.quality = quality })
                 }
+                "s3 server" in label || "shop" in label -> callback(newExtractorLink("$ref [S3/Shop Akışı]", "$ref [S3/Shop Akışı] $labelExtras $langTag", link, ExtractorLinkType.M3U8) { 
+                    this.quality = quality
+                    this.referer = realUrl
+                })
+                "fslv2"     in label -> callback(newExtractorLink("$ref [FSLv2]", "$ref [FSLv2] $labelExtras $langTag", link) { this.quality = quality })
+                "mega server" in label -> callback(newExtractorLink("$ref [Mega Server]", "$ref [Mega Server] $labelExtras $langTag", link) { this.quality = quality })
+                "pdl server" in label -> callback(newExtractorLink("$ref [PDL Server]", "$ref [PDL Server] $labelExtras $langTag", link) { this.quality = quality })
+                else -> loadExtractor(link, "", subtitleCallback, callback)
             }
-
-            if (masterM3u8 != null) {
-                return resolveMediaPlaylist(masterM3u8, targetReferer)
-            }
-
-        } catch (e: Exception) {
-            Log.e("K_MERGER", "TR Ses getirme hatasi: $e")
         }
-        return null
     }
 
-    private suspend fun resolveMediaPlaylist(masterUrl: String, referer: String): String {
-        try {
-            val res = app.get(masterUrl, referer = referer)
-            val content = res.text
-            
-            // Eger bu dosya bir TS/MP4 ise veya EXT-M3U basligi tasimiyorsa direkt don
-            if (!content.trimStart().startsWith("#EXTM3U")) {
-                Log.d("K_MERGER", "Ham Video Dosyasi bulundu: $masterUrl")
-                return masterUrl
+    private fun getIndexQuality(str: String?): Int =
+        Regex("""(\d{3,4})[pP]""").find(str.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Qualities.Unknown.value
+
+    private fun getBaseUrl(url: String): String =
+        runCatching { URI(url).let { "${it.scheme}://${it.host}" } }.getOrDefault("")
+
+    private fun cleanTitle(title: String): String {
+        val name       = title.replace(Regex("""\.[a-zA-Z0-9]{2,4}$"""), "")
+        val normalized = name
+            .replace(Regex("WEB[-_. ]?DL",  RegexOption.IGNORE_CASE), "WEB-DL")
+            .replace(Regex("WEB[-_. ]?RIP", RegexOption.IGNORE_CASE), "WEBRIP")
+            .replace(Regex("H[ .]?265",     RegexOption.IGNORE_CASE), "H265")
+            .replace(Regex("H[ .]?264",     RegexOption.IGNORE_CASE), "H264")
+            .replace(Regex("DDP[ .]?([0-9]\\.[0-9])", RegexOption.IGNORE_CASE), "DDP\$1")
+
+        val parts      = normalized.split(" ", "_", ".")
+        val sourceTags = setOf("WEB-DL","WEBRIP","BLURAY","HDRIP","DVDRIP","HDTV","CAM","TS","BRRIP","BDRIP")
+        val codecTags  = setOf("H264","H265","X264","X265","HEVC","AVC")
+        val audioTags  = setOf("AAC","AC3","DTS","MP3","FLAC","DD","DDP","EAC3")
+        val audioExtra = setOf("ATMOS")
+        val hdrTags    = setOf("SDR","HDR","HDR10","HDR10+","DV","DOLBYVISION")
+
+        return parts.mapNotNull { part ->
+            val p = part.uppercase()
+            when {
+                sourceTags.contains(p)          -> p
+                codecTags.contains(p)           -> p
+                audioTags.any { p.startsWith(it) } -> p
+                audioExtra.contains(p)          -> p
+                hdrTags.contains(p) -> if (p == "DV" || p == "DOLBYVISION") "DOLBYVISION" else p
+                p == "NF" || p == "CR"          -> p
+                else -> null
             }
-            
-            if (content.contains("#EXTINF")) return masterUrl
-            
-            val audioRegex = Regex("""#EXT-X-MEDIA:TYPE=AUDIO.*?URI=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
-            val audioMatches = audioRegex.findAll(content).toList()
-            
-            var trUri: String? = null
-            var fallbackUri: String? = null
-            
-            for (match in audioMatches) {
-                val fullLine = match.value.lowercase()
-                val uri = match.groupValues[1]
-                if (fallbackUri == null) fallbackUri = uri
-                
-                if (fullLine.contains("tr") || fullLine.contains("tur") || fullLine.contains("dublaj")) {
-                    trUri = uri
-                    break
-                }
-            }
-            
-            val selectedAudioUri = trUri ?: fallbackUri
-            if (selectedAudioUri != null) {
-                Log.d("K_MERGER", "Ozel Ses Kanali Bulundu: $selectedAudioUri")
-                return fixUrl(selectedAudioUri, masterUrl)
-            }
-            
-            val streamRegex = Regex("""#EXT-X-STREAM-INF.*?[\r\n]+([^\r\n]+)""")
-            val streams = streamRegex.findAll(content).toList()
-            if (streams.isNotEmpty()) {
-                val lowestQualityStream = streams.last().groupValues[1]
-                Log.d("K_MERGER", "Alt Video Akisi Ses İcin Secildi: $lowestQualityStream")
-                return fixUrl(lowestQualityStream, masterUrl)
-            }
-            
-        } catch (e: Exception) {
-            Log.e("K_MERGER", "Media Playlist Cozumleme Hatasi: $e")
-        }
-        return masterUrl
+        }.distinct().joinToString(" ")
     }
+}
 
-    private fun fixUrl(path: String, base: String): String {
-        if (path.startsWith("http")) return path
-        val baseUrl = base.substringBeforeLast("/")
-        return "$baseUrl/$path"
-    }
 
-    private fun decodeSecret(encodedString: String): String {
-        val reversedBase64Input = encodedString.reversed()
-        val tString = base64Decode(reversedBase64Input)
-        val oBuilder = StringBuilder()
-        val key = "K9L"
-        for (index in tString.indices) {
-            val offset = key[index % key.length].code % 5 + 1
-            oBuilder.append((tString[index].code - offset).toChar())
+class HUBCDN : ExtractorApi() {
+    override val name            = "HUBCDN"
+    override val mainUrl         = "https://hubcdn.*"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val doc        = app.get(url).document
+        val scriptText = doc.selectFirst("script:containsData(var reurl)")?.data()
+        val encodedUrl = Regex("""reurl\s*=\s*["']([^"']+)["']""")
+            .find(scriptText ?: "")?.groupValues?.get(1)?.substringAfter("?r=")
+        val decodedUrl = runCatching {
+            encodedUrl?.let { base64Decode(it) }?.substringAfterLast("link=")
+        }.getOrNull()?.substringAfterLast("link=")
+
+        if (decodedUrl != null) {
+            callback(newExtractorLink(name, name, decodedUrl, INFER_TYPE) {
+                this.quality = Qualities.Unknown.value
+            })
         }
-        return base64Decode(oBuilder.toString())
-    }
-
-    fun buildMergedM3U8(videoUrl: String, isVideoM3u8: Boolean, audioUrl: String): String {
-        // SES Dosyasi (MP4/TS) icin Sanal M3U8 olustur
-        val audioPlaylist = """
-            #EXTM3U
-            #EXT-X-VERSION:3
-            #EXT-X-TARGETDURATION:14400
-            #EXT-X-PLAYLIST-TYPE:VOD
-            #EXTINF:14400.0,
-            $audioUrl
-            #EXT-X-ENDLIST
-        """.trimIndent()
-        val audioB64 = Base64.encodeToString(audioPlaylist.toByteArray(), Base64.NO_WRAP)
-        val audioDataUri = "data:application/vnd.apple.mpegurl;base64,$audioB64"
-
-        // GORUNTU eger MP4 ise (M3u8 degilse) onu da sarmala
-        val finalVideoUri = if (!isVideoM3u8) {
-            val videoPlaylist = """
-                #EXTM3U
-                #EXT-X-VERSION:3
-                #EXT-X-TARGETDURATION:14400
-                #EXT-X-PLAYLIST-TYPE:VOD
-                #EXTINF:14400.0,
-                $videoUrl
-                #EXT-X-ENDLIST
-            """.trimIndent()
-            val videoB64 = Base64.encodeToString(videoPlaylist.toByteArray(), Base64.NO_WRAP)
-            "data:application/vnd.apple.mpegurl;base64,$videoB64"
-        } else {
-            videoUrl
-        }
-
-        // ANA PLAYLIST
-        val masterM3u8 = """
-            #EXTM3U
-            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="tr-audio",NAME="Türkçe Dublaj",DEFAULT=YES,AUTOSELECT=YES,URI="$audioDataUri"
-            #EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=3840x2160,AUDIO="tr-audio"
-            $finalVideoUri
-        """.trimIndent()
-        
-        val masterB64 = Base64.encodeToString(masterM3u8.toByteArray(), Base64.NO_WRAP)
-        return "data:application/vnd.apple.mpegurl;base64,${masterB64.replace("\n", "")}"
     }
 }
