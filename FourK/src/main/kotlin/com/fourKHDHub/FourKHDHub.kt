@@ -376,9 +376,13 @@ class FourKHDHub : MainAPI() {
 
         Log.d("4KHDHub", "loadLinks: tmdbId=$tmdbId, ham link sayısı=${links.size}")
 
+        FourKHDHubDub.status = ""
         val dub: DubAudio? = coroutineScope {
             val dubJob = async {
-                if (tmdbId == null) null
+                if (tmdbId == null) {
+                    FourKHDHubDub.status = "tmdbId yok (eski/önbellekli veri ya da TMDB eşleşmedi; başlık sayfasını yenile)"
+                    null
+                }
                 else runCatching { FourKHDHubDub.findTurkishAudio(tmdbId!!, TMDBAPI, TMDB_API_KEY) }
                     .onFailure { Log.e("4KHDHub", "Dublaj arama hatası: ${it.message}") }
                     .getOrNull()
@@ -411,6 +415,14 @@ class FourKHDHub : MainAPI() {
         // Dublaj bulunduysa, doğrudan dosya olan (HLS olmayan) linklere Türkçe sesi audioTracks ile ekle.
         // Oynatıcı bunu MergingMediaSource ile videoya birleştirir.
         val dubAudioFile = dub?.let { runCatching { it.toAudioFile() }.getOrNull() }
+        if (dubAudioFile == null) {
+            // GEÇİCİ TEŞHİS: dublaj neden yok, listede görünsün. Çalışınca bu bloğu sil.
+            callback(
+                newExtractorLink(name, "⚠ Dublaj yok: ${FourKHDHubDub.status.ifBlank { "bilinmiyor" }}", "https://example.invalid/") {
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+        }
         for (link in collected) {
             if (dubAudioFile != null && link.type != ExtractorLinkType.M3U8) {
                 callback(link) // sessiz/orijinal sürüm de kalsın: hatanın videodan mı sesten mi geldiğini ayırmak için
