@@ -8,8 +8,12 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentLinkedQueue
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
 
@@ -322,7 +326,13 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
+            // data artık JSON nesnesi: linkler + TMDB ID (loadLinks'te dublaj eşleştirmesi için).
+            val movieData = JSONObject()
+                .put("links", JSONArray(hrefs))
+                .apply { if (tmdbId != null) put("tmdb", tmdbId) }
+                .toString()
+
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, movieData) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -344,33 +354,77 @@ class FourKHDHub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // data: yeni biçim {"links":[...],"tmdb":123}, eski biçim [...] veya tek URL
+        var tmdbId: Int? = null
         val links = try {
-            val arr = org.json.JSONArray(data)
+            val obj = JSONObject(data)
+            tmdbId = obj.optInt("tmdb", 0).takeIf { it != 0 }
+            val arr = obj.optJSONArray("links") ?: JSONArray()
             (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
         } catch (_: Exception) {
-            listOf(data).filter { it.isNotBlank() }
+            try {
+                val arr = JSONArray(data)
+                (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
+            } catch (_: Exception) {
+                listOf(data).filter { it.isNotBlank() }
+            }
         }.filter { it.isNotBlank() }.distinct()
         if (links.isEmpty()) return false
 
-        links.amap { raw ->
-            val resolved = try {
-                if (raw.contains("id=")) getRedirectLinks(raw) else raw
-            } catch (e: Exception) {
-                Log.e("4KHDHub", "Redirect failed: $raw — ${e.message}")
-                return@amap
-            }
-            if (resolved.isBlank()) return@amap
+        // 4K linkleri önce toplanır; dublaj aramasıyla paralel çalışır.
+        val collected = ConcurrentLinkedQueue<ExtractorLink>()
 
-            try {
-                if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
-                } else {
-                    loadExtractor(resolved, name, subtitleCallback, callback)
+        val dub: DubAudio? = coroutineScope {
+            val dubJob = async {
+                if (tmdbId == null) null
+                else runCatching { FourKHDHubDub.findTurkishAudio(tmdbId!!, TMDBAPI, TMDB_API_KEY) }
+                    .onFailure { Log.e("4KHDHub", "Dublaj arama hatası: ${it.message}") }
+                    .getOrNull()
+            }
+
+            links.amap { raw ->
+                val resolved = try {
+                    if (raw.contains("id=")) getRedirectLinks(raw) else raw
+                } catch (e: Exception) {
+                    Log.e("4KHDHub", "Redirect failed: $raw — ${e.message}")
+                    return@amap
                 }
-            } catch (e: Exception) {
-                Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
+                if (resolved.isBlank()) return@amap
+
+                try {
+                    if (resolved.contains("hubcloud", ignoreCase = true)) {
+                        HubCloud().getUrl(resolved, name, subtitleCallback) { collected.add(it) }
+                    } else {
+                        loadExtractor(resolved, name, subtitleCallback) { collected.add(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
+                }
+            }
+            dubJob.await()
+        }
+
+        Log.d("4KHDHub", "Toplanan link: ${collected.size}, dublaj: ${dub?.url}")
+
+        // Dublaj bulunduysa, doğrudan dosya olan (HLS olmayan) linklere Türkçe sesi audioTracks ile ekle.
+        // Oynatıcı bunu MergingMediaSource ile videoya birleştirir.
+        val dubAudioFile = dub?.let { runCatching { it.toAudioFile() }.getOrNull() }
+        for (link in collected) {
+            if (dubAudioFile != null && link.type != ExtractorLinkType.M3U8) {
+                callback(
+                    newExtractorLink(link.source, "${link.name} + TR Dublaj", link.url) {
+                        this.type          = link.type
+                        this.quality       = link.quality
+                        this.referer       = link.referer
+                        this.headers       = link.headers
+                        this.extractorData = link.extractorData
+                        this.audioTracks   = listOf(dubAudioFile)
+                    }
+                )
+            } else {
+                callback(link)
             }
         }
-        return true
+        return collected.isNotEmpty()
     }
 }
