@@ -28,9 +28,7 @@ class FullHDFilmizleseneAudio {
                 val iframeSrc = movieDoc.select("iframe[src*=rapidvid], iframe[src*=turbo]").attr("src")
                 if (iframeSrc.isBlank()) return@withContext null
 
-                // 3. Sesi çıkar (Bu örnekte RapidVid'in şifresini çözüp doğrudan mp4/m3u8 alıyoruz)
-                // Not: RapidVid/TurboImgz extractör kodlarını buraya entegre edeceğiz.
-                // Şimdilik test için iframe adresini döndürüyoruz, tam entegrasyonda burası Extractor'a gidecek.
+                // 3. Sesi çıkar
                 return@withContext extractAudioFromIframe(iframeSrc)
             } catch (e: Exception) {
                 null
@@ -44,4 +42,4 @@ class FullHDFilmizleseneAudio {
         // Regex ile M3U8'i yakala
         return Regex("""file["']?\s*:\s*["']([^"']+)["']""").find(res)?.groupValues?.get(1)?.replace("\\", "")
     }
-}FullHDFilmizleseneAudio.kt
+}
