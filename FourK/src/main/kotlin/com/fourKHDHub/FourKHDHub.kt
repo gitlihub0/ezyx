@@ -8,7 +8,6 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
@@ -105,7 +104,11 @@ class FourKHDHub : MainAPI() {
         val tvType      = if ("Movies" in tags) TvType.Movie else TvType.TvSeries
         val isMovie     = tvType == TvType.Movie
         val tmdbId      = runCatching { fetchtmdb(title, isMovie) }.getOrNull()
-        val hrefs       = document.select("div.download-item a").eachAttr("href")
+        
+        // Film detay sayfasındaki tüm indirme/oynatma linklerini yakalayalım (.shop dahil)
+        val hrefs       = document.select("div.download-item a, section.player-alan a, .player-alan iframe").eachAttr("href")
+            .ifEmpty { document.select("a").mapNotNull { it.attr("href").takeIf { h -> h.contains("shop") || h.contains("hubcloud") } } }
+
         val description = document.selectFirst("div.content-section p.mt-4")?.text()?.trim()
         val trailer     = document.selectFirst("#trailer-btn")?.attr("data-trailer-url")
 
@@ -237,55 +240,6 @@ class FourKHDHub : MainAPI() {
                 }
             }
 
-            // Additional fallback: download-item blocks that carry season info
-            document.select("div.download-item").forEach { item ->
-                val headerText = item.select("div.flex-1.text-left.font-semibold").text()
-                val season     = Regex("""S([0-9]+)""").find(headerText)?.groupValues?.get(1)?.toIntOrNull()
-                    ?: return@forEach
-                val size       = Regex("""(\d+(?:\.\d+)?\s*GB)""").find(headerText)?.groupValues?.get(1) ?: "Unknown Size"
-                val quality    = Regex("""(\d{3,4}p)""").find(headerText)?.groupValues?.get(1) ?: "Unknown Quality"
-                val hrefList   = item.select("a").mapNotNull { it.attr("href").takeIf { it.isNotBlank() } }
-                val fileTitle  = item.select("div.file-title").text()
-                    .replace(Regex("""\[[^]]*]"""), "")
-                    .replace(Regex("""\(.+?\)"""), "")
-
-                if (hrefList.isNotEmpty()) {
-                    var nextEpisode = maxEpisodePerSeason.getOrDefault(season, 0) + 1
-                    var epName:     String? = null
-                    var epOverview: String? = null
-                    var epThumb:    String? = null
-                    var epAir:      String? = null
-                    var epRating:   Double? = null
-
-                    tmdbSeasonCache[season]?.optJSONArray("episodes")?.let { arr ->
-                        for (i in 0 until arr.length()) {
-                            val epObj = arr.optJSONObject(i) ?: continue
-                            if (epObj.optInt("episode_number") == nextEpisode) {
-                                epName     = epObj.optString("name").takeIf { it.isNotBlank() }
-                                epOverview = epObj.optString("overview").takeIf { it.isNotBlank() }
-                                epThumb    = epObj.optString("still_path").takeIf { it.isNotBlank() }?.let { TMDBIMAGEBASEURL + it }
-                                epAir      = epObj.optString("air_date").takeIf { it.isNotBlank() }
-                                epRating   = epObj.optDouble("vote_average").takeIf { !it.isNaN() && it > 0.0 }
-                                break
-                            }
-                        }
-                    }
-
-                    tvSeriesEpisodes += newEpisode(hrefList.distinct()) {
-                        this.season      = season
-                        this.episode     = nextEpisode
-                        this.name        = epName ?: "S${season.toString().padStart(2, '0')} – $fileTitle [$quality, $size]".trim()
-                        this.posterUrl   = epThumb
-                        this.description = epOverview
-                        addDate(epAir)
-                        this.score       = safeScoreFrom10(epRating)
-                    }
-
-                    nextEpisode++
-                    maxEpisodePerSeason[season] = nextEpisode - 1
-                }
-            }
-
             newTvSeriesLoadResponse(fixedTitle, url, TvType.TvSeries, tvSeriesEpisodes) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
@@ -362,10 +316,22 @@ class FourKHDHub : MainAPI() {
             if (resolved.isBlank()) return@amap
 
             try {
-                if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
-                } else {
-                    loadExtractor(resolved, name, subtitleCallback, callback)
+                when {
+                    resolved.contains("hubcloud", ignoreCase = true) -> {
+                        HubCloud().getUrl(resolved, name, subtitleCallback, callback)
+                    }
+                    resolved.contains("shop", ignoreCase = true) || resolved.contains("cdnimg", ignoreCase = true) -> {
+                        // Doğrudan .shop veya CDN üzerinden gelen parçalı ses/video akışı
+                        callback(
+                            newExtractorLink(name, "$name [S3/Shop Akışı]", resolved, ExtractorLinkType.M3U8) {
+                                this.quality = Qualities.P1080.value
+                                this.referer = mainUrl
+                            }
+                        )
+                    }
+                    else -> {
+                        loadExtractor(resolved, name, subtitleCallback, callback)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
