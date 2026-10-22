@@ -84,27 +84,6 @@
         "fileHash": "sha256-3cb07716ae1b2100514e1969450cc8bf77110dd696399d590e916faa19ae45d2"
     },
     {
-        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/UHD.cs3",
-        "status": 1,
-        "version": 1,
-        "name": "UHD",
-        "internalName": "UHD",
-        "authors": [
-            "MTS"
-        ],
-        "description": "UHD - Yerel altyaz\u0131 destekli 4K Film Sa\u011flay\u0131c\u0131s\u0131",
-        "fileSize": 64353,
-        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
-        "language": "tr",
-        "tvTypes": [
-            "Movie",
-            "TvSeries"
-        ],
-        "iconUrl": "https://4khdhub.one/favicon.ico",
-        "apiVersion": 1,
-        "fileHash": "sha256-a97178e4aa6b05b3157e43bd9f01a2d82dc193b1aebc5553f1688f41e7564b2d"
-    },
-    {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/YFilmizle.cs3",
         "status": 1,
         "version": 1,
