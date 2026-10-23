@@ -51,7 +51,7 @@
             "MTS"
         ],
         "description": "Provider untuk -4-K-H-D-H-u-b-",
-        "fileSize": 68030,
+        "fileSize": 67693,
         "repositoryUrl": "https://github.com/gitlihub0/ezyx",
         "language": "id",
         "tvTypes": [
@@ -60,7 +60,7 @@
         ],
         "iconUrl": "https://4khdhub.one/favicon.ico",
         "apiVersion": 1,
-        "fileHash": "sha256-926fe0e2d4f03ac4754a946e5bc7562698599f20897a204ecbe3baafbad370ba"
+        "fileHash": "sha256-450704f4b70d7734cbe94c278ab143e2782214fd7cf0431f711a967fd91a1d17"
     },
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/fullhdfilm.cs3",
