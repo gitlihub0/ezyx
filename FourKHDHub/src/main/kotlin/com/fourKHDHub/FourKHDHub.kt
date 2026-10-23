@@ -11,7 +11,9 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -380,8 +382,8 @@ class FourKHDHub : MainAPI() {
 
         // ===============================================================
         // MASHUP: FullHDFilmizlesene'den Otomatik TR Ses Çekme Sistemi
-        // ===============================================================
-        val trAudioFiles = mutableListOf<AudioFile>()
+        // Thread-safe bir liste kullanarak asenkron kayıt yapıyoruz
+        val rawTrAudio = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
         
         if (queryTitle.isNotBlank()) {
             try {
@@ -392,14 +394,8 @@ class FourKHDHub : MainAPI() {
                 if (bestMatch != null) {
                     fhd.loadLinks(bestMatch.url, isCasting, subtitleCallback) { fhdLink ->
                         val audioUrl = if (fhdLink.url.contains(".m3u8")) fhdLink.url else "${fhdLink.url}#.m3u8"
-                        
-                        // CloudStream'in yeni mimarisine uygun runBlocking çözümü
-                        val newAudio = runBlocking {
-                            newAudioFile(audioUrl) {
-                                this.headers = fhdLink.headers ?: mapOf("Referer" to fhd.mainUrl)
-                            }
-                        }
-                        trAudioFiles.add(newAudio)
+                        // Suspend işleme girmeden metin verilerini listede topluyoruz
+                        rawTrAudio.add(Pair(audioUrl, fhdLink.headers ?: mapOf("Referer" to fhd.mainUrl)))
                     }
                 }
             } catch (e: Exception) {
@@ -409,11 +405,17 @@ class FourKHDHub : MainAPI() {
         // ===============================================================
 
         val interceptCallback: (ExtractorLink) -> Unit = { originalLink ->
-            // CloudStream'in yeni mimarisine uygun runBlocking çözümü
-            val linkWithAudio = runBlocking {
-                newExtractorLink(
+            // Sistemin kilitlenmesini engellemek için suspend görevleri arkaplanda launch ile başlatıyoruz
+            CoroutineScope(Dispatchers.IO).launch {
+                val audioTracksList = rawTrAudio.map { rawData ->
+                    newAudioFile(rawData.first) {
+                        this.headers = rawData.second
+                    }
+                }
+
+                val linkWithAudio = newExtractorLink(
                     source = originalLink.source,
-                    name = if (trAudioFiles.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
+                    name = if (audioTracksList.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
                     url = originalLink.url,
                     type = originalLink.type
                 ) {
@@ -422,22 +424,22 @@ class FourKHDHub : MainAPI() {
                     this.headers = originalLink.headers ?: emptyMap()
                     this.extractorData = originalLink.extractorData
                     
-                    if (trAudioFiles.isNotEmpty()) {
-                        this.audioTracks = trAudioFiles.toList()
+                    if (audioTracksList.isNotEmpty()) {
+                        this.audioTracks = audioTracksList
                     }
                 }
+                callback.invoke(linkWithAudio)
             }
-            callback.invoke(linkWithAudio)
         }
 
-        for (raw in cleanLinks) {
+        cleanLinks.amap { raw ->
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
                 Log.e("FourKHDHub", "Redirect failed: $raw — ${e.message}")
-                continue
+                return@amap
             }
-            if (resolved.isBlank()) continue
+            if (resolved.isBlank()) return@amap
 
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
