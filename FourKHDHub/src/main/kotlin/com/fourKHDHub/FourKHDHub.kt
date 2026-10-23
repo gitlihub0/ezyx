@@ -225,7 +225,6 @@ class FourKHDHub : MainAPI() {
                     }
                 }
 
-                // Dizi bölümleri için başlık bilgisini ve linkleri JSON formatına gömüyoruz
                 val mashupDataEpisode = JSONObject().apply {
                     put("title", fixedTitle)
                     put("links", org.json.JSONArray(hrefsList.distinct()))
@@ -242,7 +241,6 @@ class FourKHDHub : MainAPI() {
                 }
             }
 
-            // Additional fallback: download-item blocks that carry season info
             document.select("div.download-item").forEach { item ->
                 val headerText = item.select("div.flex-1.text-left.font-semibold").text()
                 val season     = Regex("""S([0-9]+)""").find(headerText)?.groupValues?.get(1)?.toIntOrNull()
@@ -276,7 +274,6 @@ class FourKHDHub : MainAPI() {
                         }
                     }
 
-                    // Fallback bölümleri için mashupData
                     val mashupDataFallback = JSONObject().apply {
                         put("title", fixedTitle)
                         put("links", org.json.JSONArray(hrefList.distinct()))
@@ -333,7 +330,6 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            // Filmler için başlık bilgisini ve linkleri JSON formatına gömüyoruz
             val mashupData = JSONObject().apply {
                 put("title", fixedTitle)
                 put("links", org.json.JSONArray(hrefs))
@@ -364,7 +360,6 @@ class FourKHDHub : MainAPI() {
         var queryTitle = ""
         val links = mutableListOf<String>()
 
-        // 1. JSON parse ile başlık ve linkleri çözümle
         try {
             val json = JSONObject(data)
             queryTitle = json.optString("title", "")
@@ -373,7 +368,6 @@ class FourKHDHub : MainAPI() {
                 for (i in 0 until arr.length()) links.add(arr.optString(i))
             }
         } catch (e: Exception) {
-            // Geriye dönük uyumluluk
             try {
                 val arr = org.json.JSONArray(data)
                 for (i in 0 until arr.length()) links.add(arr.optString(i))
@@ -390,13 +384,11 @@ class FourKHDHub : MainAPI() {
         
         if (queryTitle.isNotBlank()) {
             try {
-                // Diğer eklentinizin (FullHDFilmizlesene) sınıfını çağırıp arama yaptırıyoruz
                 val fhd = com.fullhdfilm.FullHDFilmizlesene() 
                 val searchResults = fhd.search(queryTitle)
                 val bestMatch = searchResults.firstOrNull() 
                 
                 if (bestMatch != null) {
-                    // Detay sayfasına gidip extractor'ların sonuç vermesini bekliyoruz
                     fhd.loadLinks(bestMatch.url, isCasting, subtitleCallback) { fhdLink ->
                         val audioUrl = if (fhdLink.url.contains(".m3u8")) fhdLink.url else "${fhdLink.url}#.m3u8"
                         
@@ -413,7 +405,6 @@ class FourKHDHub : MainAPI() {
         }
         // ===============================================================
 
-        // Interceptor callback: Asıl 4K videoya çektiğimiz sesleri ekler
         val interceptCallback: (ExtractorLink) -> Unit = { originalLink ->
             val linkWithAudio = newExtractorLink(
                 source = originalLink.source,
@@ -433,15 +424,15 @@ class FourKHDHub : MainAPI() {
             callback.invoke(linkWithAudio)
         }
 
-        // Asıl 4KHDHub linklerini çözme işlemi (kendi extractor'larına gönderiyor)
-        cleanLinks.amap { raw ->
+        // HATA ÇÖZÜMÜ: Sorun yaratan "amap" yerine standart Kotlin for döngüsü kullanıldı
+        for (raw in cleanLinks) {
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
                 Log.e("FourKHDHub", "Redirect failed: $raw — ${e.message}")
-                return@amap
+                continue
             }
-            if (resolved.isBlank()) return@amap
+            if (resolved.isBlank()) continue
 
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
