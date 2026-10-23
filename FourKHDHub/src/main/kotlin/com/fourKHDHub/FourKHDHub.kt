@@ -323,10 +323,11 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            // Film adını ve linkleri JSON nesnesi olarak paketliyoruz
+            // IMDb ID ile eşleşme için payload içine imdbId ekleniyor
             val moviePayload = JSONObject().apply {
                 put("isMovie", true)
                 put("title", fixedTitle)
+                put("imdbId", imdbIdFromMovie ?: "")
                 put("links", org.json.JSONArray(hrefs))
             }.toString()
 
@@ -354,6 +355,7 @@ class FourKHDHub : MainAPI() {
     ): Boolean {
         var isMovie = false
         var movieTitle: String? = null
+        var imdbId: String? = null
         val links = mutableListOf<String>()
 
         try {
@@ -361,6 +363,7 @@ class FourKHDHub : MainAPI() {
                 val json = JSONObject(data)
                 isMovie = json.optBoolean("isMovie", false)
                 movieTitle = json.optString("title")
+                imdbId = json.optString("imdbId").takeIf { it.isNotBlank() }
                 val arr = json.optJSONArray("links")
                 if (arr != null) {
                     for (i in 0 until arr.length()) links.add(arr.optString(i))
@@ -378,7 +381,7 @@ class FourKHDHub : MainAPI() {
 
         val interceptorCallback = { link: ExtractorLink ->
             CoroutineScope(Dispatchers.IO).launch {
-                FourKHDHubAudio.applyAudioTrack(link, isMovie, movieTitle, callback)
+                FourKHDHubAudio.applyAudioTrack(link, isMovie, imdbId, movieTitle, callback)
             }
             Unit
         }
