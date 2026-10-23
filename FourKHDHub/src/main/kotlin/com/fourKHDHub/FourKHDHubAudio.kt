@@ -3,22 +3,43 @@ package com.fourKHDHub
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.newAudioFile // <-- Eksik import eklendi
+import com.lagradost.cloudstream3.newAudioFile
 import android.util.Base64
 import android.util.Log
 
 object FourKHDHubAudio {
 
-    suspend fun fetchTurkishAudio(movieTitle: String): String? {
+    // IMDb ID veya Film Adı ile hedef siteden Türkçe ses linkini bulur
+    suspend fun fetchTurkishAudio(imdbId: String?, movieTitle: String?): String? {
         try {
-            val query = java.net.URLEncoder.encode(movieTitle, "UTF-8")
-            val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$query"
-            val doc = app.get(searchUrl).document
-            
-            val firstResult = doc.selectFirst("li.film a")?.attr("href") ?: return null
-            val movieUrl = if (firstResult.startsWith("http")) firstResult else "https://www.fullhdfilmizlesene.now$firstResult"
-            
-            val movieDoc = app.get(movieUrl).document
+            var targetMovieUrl: String? = null
+
+            // 1. Önce IMDb ID ile hedef sitede arama yapmayı deneriz (Kesin çözüm)
+            if (!imdbId.isNullOrBlank()) {
+                val imdbSearchUrl = "https://www.fullhdfilmizlesene.now/arama/$imdbId"
+                val doc = app.get(imdbSearchUrl).document
+                val firstResult = doc.selectFirst("li.film a")?.attr("href")
+                if (firstResult != null) {
+                    targetMovieUrl = if (firstResult.startsWith("http")) firstResult else "https://www.fullhdfilmizlesene.now$firstResult"
+                }
+            }
+
+            // 2. Eğer IMDb ile bulunamazsa film ismi ile arama yapılır (Yedek yöntem)
+            if (targetMovieUrl == null && !movieTitle.isNullOrBlank()) {
+                val cleanTitle = movieTitle.replace(Regex("""\s+\(\d{4}\)$"""), "").trim()
+                val query = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                val searchUrl = "https://www.fullhdfilmizlesene.now/arama/$query"
+                val doc = app.get(searchUrl).document
+                val firstResult = doc.selectFirst("li.film a")?.attr("href")
+                if (firstResult != null) {
+                    targetMovieUrl = if (firstResult.startsWith("http")) firstResult else "https://www.fullhdfilmizlesene.now$firstResult"
+                }
+            }
+
+            if (targetMovieUrl == null) return null
+
+            // 3. Film sayfasına gidip scx şifresini çözeriz
+            val movieDoc = app.get(targetMovieUrl).document
             val scripts = movieDoc.select("script").map { it.data() }
             
             var rapidVidUrl: String? = null
@@ -28,7 +49,6 @@ object FourKHDHubAudio {
                         Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
                             .find(script)?.groupValues?.get(1) ?: continue
                     )
-                    // scx yapısına uygun güvenli okuma
                     val tMatch = runCatching {
                         scxJson.getJSONObject("atom").getJSONObject("sx").getJSONArray("t").getString(0)
                     }.getOrNull()
@@ -53,6 +73,7 @@ object FourKHDHubAudio {
             
             if (rapidVidUrl == null) return null
             
+            // 4. RapidVid token (p8) çözümlemesi
             val rapidRes = app.get(rapidVidUrl, referer = "https://www.fullhdfilmizlesene.now/").text
             val p8 = Regex("""_p8\s*=\s*['"]([^'"]+)['"]""").find(rapidRes)?.groupValues?.get(1)
             
@@ -62,10 +83,9 @@ object FourKHDHubAudio {
                 val oBuilder = java.lang.StringBuilder()
                 val key = "K9L"
                 for (index in tString.indices) {
-                    // Byte -> Int dönüşümü düzeltildi (.toInt() & 0xFF)
                     val bVal = tString[index].toInt() and 0xFF
                     val offset = key[index % key.length].code % 5 + 1
-                    oBuilder.append((bVal - offset).toChar()) // .toChar() hatası giderildi
+                    oBuilder.append((bVal - offset).toChar())
                 }
                 val decodedJsonStr = String(Base64.decode(oBuilder.toString(), Base64.DEFAULT), Charsets.UTF_8)
                 val cmUrl = Regex("""["']?cm["']?\s*:\s*["']([^"']+)["']""").find(decodedJsonStr)?.groupValues?.get(1)
@@ -75,7 +95,7 @@ object FourKHDHubAudio {
                 }
             }
         } catch (e: Exception) {
-            Log.e("AudioModule", "Ses çekme hatası: ${e.message}")
+            Log.e("AudioModule", "IMDb tabanlı ses çekme hatası: ${e.message}")
         }
         return null
     }
@@ -83,12 +103,13 @@ object FourKHDHubAudio {
     suspend fun applyAudioTrack(
         link: ExtractorLink,
         isMovie: Boolean,
+        imdbId: String?,
         movieTitle: String?,
         callback: (ExtractorLink) -> Unit
     ) {
         var audioTrackUrl: String? = null
-        if (isMovie && !movieTitle.isNullOrBlank()) {
-            audioTrackUrl = fetchTurkishAudio(movieTitle)
+        if (isMovie) {
+            audioTrackUrl = fetchTurkishAudio(imdbId, movieTitle)
         }
 
         val newLink = newExtractorLink(link.source, link.name, link.url, link.type) {
