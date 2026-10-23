@@ -109,7 +109,7 @@ object FourKHDHubAudio {
         return null
     }
 
-    // Ses Parçalarını Ekleme ve İstediğiniz Site Adı İmzasını Ekleme
+    // Ses Parçalarını Ekleme (Etiket ataması kaldırıldı, hata giderildi)
     suspend fun applyAudioTrack(
         link: ExtractorLink,
         isMovie: Boolean,
@@ -139,8 +139,6 @@ object FourKHDHubAudio {
                             "Origin" to "https://www.fullhdfilmizlesene.now",
                             "Referer" to "https://www.fullhdfilmizlesene.now/"
                         )
-                        // Parçalar menüsünde görünecek özel etiket
-                        this.label = "Türkçe Stereo AAC · FullHDFilm"
                     }
                 )
             }
