@@ -42,27 +42,6 @@
         "fileHash": "sha256-83a1f92f4a6ca6cdc1a410c3260fb06951b401657c1be1762c4fee39fe502d88"
     },
     {
-        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/FourKHDHub.cs3",
-        "status": 1,
-        "version": 1,
-        "name": "FourKHDHub",
-        "internalName": "FourKHDHub",
-        "authors": [
-            "MTS"
-        ],
-        "description": "Provider untuk -4-K-H-D-H-u-b-",
-        "fileSize": 70582,
-        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
-        "language": "id",
-        "tvTypes": [
-            "Movie",
-            "TvSeries"
-        ],
-        "iconUrl": "https://4khdhub.one/favicon.ico",
-        "apiVersion": 1,
-        "fileHash": "sha256-2b4a5ee7f0326b84ec933768f4af210041bdbafb4a265e955ea0e1c0c8b0fb1d"
-    },
-    {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/fullhdfilm.cs3",
         "status": 1,
         "version": 3,
