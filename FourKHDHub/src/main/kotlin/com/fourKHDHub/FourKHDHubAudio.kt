@@ -3,13 +3,12 @@ package com.fourKHDHub
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.newAudioFile
+import com.lagradost.cloudstream3.newAudioFile // <-- Eksik import eklendi
 import android.util.Base64
 import android.util.Log
 
 object FourKHDHubAudio {
 
-    // Türkçe ses bağlantısını otomatik bulup #.m3u8 ekleyen ana fonksiyon
     suspend fun fetchTurkishAudio(movieTitle: String): String? {
         try {
             val query = java.net.URLEncoder.encode(movieTitle, "UTF-8")
@@ -25,8 +24,14 @@ object FourKHDHubAudio {
             var rapidVidUrl: String? = null
             for (script in scripts) {
                 if (script.contains("scx")) {
-                    val scxJson = Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL).find(script)?.groupValues?.get(1) ?: continue
-                    val tMatch = Regex("""\["([^"]+)"\]""").find(scxJson)?.groupValues?.get(1)
+                    val scxJson = org.json.JSONObject(
+                        Regex("""scx\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
+                            .find(script)?.groupValues?.get(1) ?: continue
+                    )
+                    // scx yapısına uygun güvenli okuma
+                    val tMatch = runCatching {
+                        scxJson.getJSONObject("atom").getJSONObject("sx").getJSONArray("t").getString(0)
+                    }.getOrNull()
                     
                     if (tMatch != null) {
                         val rotDecoded = String(Base64.decode(
@@ -57,8 +62,10 @@ object FourKHDHubAudio {
                 val oBuilder = java.lang.StringBuilder()
                 val key = "K9L"
                 for (index in tString.indices) {
+                    // Byte -> Int dönüşümü düzeltildi (.toInt() & 0xFF)
+                    val bVal = tString[index].toInt() and 0xFF
                     val offset = key[index % key.length].code % 5 + 1
-                    oBuilder.append((tString[index].code - offset).toChar())
+                    oBuilder.append((bVal - offset).toChar()) // .toChar() hatası giderildi
                 }
                 val decodedJsonStr = String(Base64.decode(oBuilder.toString(), Base64.DEFAULT), Charsets.UTF_8)
                 val cmUrl = Regex("""["']?cm["']?\s*:\s*["']([^"']+)["']""").find(decodedJsonStr)?.groupValues?.get(1)
@@ -73,7 +80,6 @@ object FourKHDHubAudio {
         return null
     }
 
-    // Video ExtractorLink nesnesine harici sesi bağlayan sarmalayıcı (wrapper)
     suspend fun applyAudioTrack(
         link: ExtractorLink,
         isMovie: Boolean,
