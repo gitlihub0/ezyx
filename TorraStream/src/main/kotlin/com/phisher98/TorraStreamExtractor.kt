@@ -1,5 +1,7 @@
 package com.phisher98
 
+import android.content.SharedPreferences
+import android.util.Base64
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.amap
@@ -13,6 +15,9 @@ import com.phisher98.TorraStream.Companion.AnimetoshoAPI
 import com.phisher98.TorraStream.Companion.SubtitlesAPI
 import com.phisher98.TorraStream.Companion.TRACKER_LIST_URL
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 suspend fun invokeTorrentio(
     mainUrl: String,
@@ -277,8 +282,8 @@ suspend fun invokeSubtitleAPI(
             val suburl = it.url
             subtitleCallback.invoke(
                 newSubtitleFile(
-                    lan.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },  // Use label for the name
-                    suburl     // Use extracted URL
+                    lan.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },
+                    suburl
                 )
             )
         }
@@ -819,5 +824,58 @@ suspend fun invokeMeteorAnimeDebian(
                 quality = getIndexQuality(stream.name)
             }
         )
+    }
+}
+
+// ----------------------------------------------------
+// Filtreleme ve IMDb ID tabanlı Türkçe Ses Enjeksiyonu
+// ----------------------------------------------------
+fun filteredCallback(
+    sharedPref: SharedPreferences,
+    imdbId: String?,
+    callback: (ExtractorLink) -> Unit
+): (ExtractorLink) -> Unit {
+
+    val excludedQualities = sharedPref.getString("qualityfilter", "")
+        ?.lowercase()
+        ?.split(",")
+        ?.filter { it.isNotBlank() }
+        ?: emptyList()
+
+    val maxSize = sharedPref.getString("sizefilter", "")?.toDoubleOrNull()
+    val limit = sharedPref.getString("limit", "")?.toIntOrNull() ?: 0
+    var resultCount = 0
+
+    return fun(link: ExtractorLink) {
+        if (limit in 1..resultCount) return
+
+        val detectedQuality = when (link.quality) {
+            in 2000..3000 -> "4k"
+            in 1080..1999 -> "1080p"
+            in 720..1079 -> "720p"
+            in 480..719 -> "480p"
+            else -> "other"
+        }
+
+        if (detectedQuality in excludedQualities) return
+
+        val sizeMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(GB|MB)""", RegexOption.IGNORE_CASE)
+            .find(link.name)
+
+        val sizeValue = sizeMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+        val sizeUnit = sizeMatch?.groupValues?.get(2)
+
+        val sizeGB = when (sizeUnit?.uppercase()) {
+            "GB" -> sizeValue
+            "MB" -> sizeValue?.div(1024)
+            else -> null
+        }
+        if (maxSize != null && sizeGB != null && sizeGB > maxSize) return
+
+        // Arka planda TorraStreamAudio modülü üzerinden Türkçe ses parçasını enjekte ediyoruz
+        CoroutineScope(Dispatchers.IO).launch {
+            TorraStreamAudio.applyAudioTrack(link, imdbId, callback)
+        }
+        resultCount++
     }
 }
