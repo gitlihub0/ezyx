@@ -228,7 +228,6 @@ class FourKHDHub : MainAPI() {
                     }
                 }
 
-                // Dizi bölümleri için her linki Sezon ve Bölüm bilgisiyle paketliyoruz
                 val episodePayloads = hrefsList.distinct().map { rawLink ->
                     JSONObject().apply {
                         put("isMovie", false)
@@ -286,7 +285,6 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            // Film için payload (isMovie, title, imdbId, links)
             val moviePayload = JSONObject().apply {
                 put("isMovie", true)
                 put("title", fixedTitle)
@@ -316,7 +314,7 @@ class FourKHDHub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        var isMovie = false
+        var isMovie = true
         var movieTitle: String? = null
         var imdbId: String? = null
         var season: Int? = null
@@ -327,7 +325,7 @@ class FourKHDHub : MainAPI() {
             if (data.trim().startsWith("{")) {
                 val json = JSONObject(data)
                 isMovie = json.optBoolean("isMovie", true)
-                movieTitle = json.optString("title")
+                movieTitle = json.optString("title").takeIf { it.isNotBlank() }
                 imdbId = json.optString("imdbId").takeIf { it.isNotBlank() }
                 season = json.optInt("season", -1).takeIf { it != -1 }
                 episode = json.optInt("episode", -1).takeIf { it != -1 }
@@ -338,12 +336,16 @@ class FourKHDHub : MainAPI() {
                 } else {
                     val arr = json.optJSONArray("links")
                     if (arr != null) {
-                        for (i in 0 until arr.length()) links.add(arr.optString(i))
+                        for (i in 0 until arr.length()) {
+                            links.add(arr.optString(i))
+                        }
                     }
                 }
             } else {
                 val arr = org.json.JSONArray(data)
-                for (i in 0 until arr.length()) links.add(arr.optString(i))
+                for (i in 0 until arr.length()) {
+                    links.add(arr.optString(i))
+                }
             }
         } catch (_: Exception) {
             links.add(data)
