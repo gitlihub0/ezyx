@@ -15,7 +15,6 @@ import androidx.core.content.edit
 import com.gitlihub0.torrastream.BuildConfig
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.lagradost.cloudstream3.CommonActivity.showToast
-import com.phisher98.BuildConfig
 import com.phisher98.TorraStreamProvider
 
 class SettingsFragment(
