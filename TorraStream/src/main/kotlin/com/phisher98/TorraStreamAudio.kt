@@ -3,7 +3,7 @@ package com.phisher98
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.AudioFile
+import com.lagradost.cloudstream3.newAudioFile
 import android.util.Base64
 import android.util.Log
 
@@ -79,7 +79,7 @@ object TorraStreamAudio {
         return null
     }
 
-    // Torrent/Debrid linkine Türkçe ses dosyasını enjekte eder (name parametresi hatası giderildi)
+    // Torrent/Debrid linkine Türkçe ses dosyasını newAudioFile ile enjekte eder
     suspend fun applyAudioTrack(
         link: ExtractorLink,
         imdbId: String?,
@@ -95,13 +95,12 @@ object TorraStreamAudio {
             
             if (audioTrackUrl != null) {
                 this.audioTracks = listOf(
-                    AudioFile(
-                        url = audioTrackUrl,
-                        headers = mapOf(
+                    newAudioFile(audioTrackUrl) {
+                        this.headers = mapOf(
                             "Origin" to "https://www.fullhdfilmizlesene.now",
                             "Referer" to "https://www.fullhdfilmizlesene.now/"
                         )
-                    )
+                    }
                 )
             }
         }
