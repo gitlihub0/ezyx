@@ -11,9 +11,9 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -359,7 +359,7 @@ class FourKHDHub : MainAPI() {
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    ): Boolean = coroutineScope {
         var queryTitle = ""
         val links = mutableListOf<String>()
 
@@ -378,79 +378,85 @@ class FourKHDHub : MainAPI() {
         }
 
         val cleanLinks = links.filter { it.isNotBlank() }.distinct()
-        if (cleanLinks.isEmpty()) return false
+        if (cleanLinks.isEmpty()) return@coroutineScope false
 
-        // ===============================================================
-        // MASHUP: FullHDFilmizlesene'den Otomatik TR Ses Çekme Sistemi
-        // Thread-safe bir liste kullanarak asenkron kayıt yapıyoruz
-        val rawTrAudio = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
-        
-        if (queryTitle.isNotBlank()) {
-            try {
-                val fhd = com.fullhdfilm.FullHDFilmizlesene() 
-                val searchResults = fhd.search(queryTitle)
-                val bestMatch = searchResults.firstOrNull() 
+        val fhdRawLinks = mutableListOf<ExtractorLink>()
+        val baseLinks = mutableListOf<ExtractorLink>()
+
+        // 1. FHD Araması ve 4KHDHub Link Çözümlemeleri paralel (aynı anda) yapılıyor.
+        // FHD araması yanıt vermezse ana filmi çökertmemek için maksimum 5 saniye bekleme kuralı eklendi.
+        val fhdJob = launch {
+            if (queryTitle.isNotBlank()) {
+                withTimeoutOrNull(5000L) {
+                    try {
+                        val fhd = com.fullhdfilm.FullHDFilmizlesene() 
+                        val searchResults = fhd.search(queryTitle)
+                        val bestMatch = searchResults.firstOrNull() 
+                        
+                        if (bestMatch != null) {
+                            fhd.loadLinks(bestMatch.url, isCasting, subtitleCallback) { fhdLink ->
+                                fhdRawLinks.add(fhdLink)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("FourKHDHub", "FHD Ses Çekme Hatası: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val hubJobs = cleanLinks.map { raw ->
+            launch {
+                val resolved = try {
+                    if (raw.contains("id=")) getRedirectLinks(raw) else raw
+                } catch (e: Exception) {
+                    return@launch
+                }
+                if (resolved.isBlank()) return@launch
+
+                try {
+                    if (resolved.contains("hubcloud", ignoreCase = true)) {
+                        HubCloud().getUrl(resolved, name, subtitleCallback) { baseLinks.add(it) }
+                    } else {
+                        loadExtractor(resolved, name, subtitleCallback) { baseLinks.add(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("FourKHDHub", "Extractor failed: $resolved — ${e.message}")
+                }
+            }
+        }
+
+        // 2. Bütün arkaplan işlemlerinin tamamlanmasını bekle (race condition çözüm noktası)
+        fhdJob.join()
+        hubJobs.forEach { it.join() }
+
+        // 3. Suspend (derleyici) hatasını tetiklememek için objeleri en dışta ana gövdede inşa ediyoruz.
+        val trAudioFiles = fhdRawLinks.map { fhdLink ->
+            val audioUrl = if (fhdLink.url.contains(".m3u8")) fhdLink.url else "${fhdLink.url}#.m3u8"
+            newAudioFile(audioUrl) {
+                this.headers = fhdLink.headers ?: mapOf("Referer" to "https://www.fullhdfilmizlesene.now")
+            }
+        }
+
+        baseLinks.forEach { originalLink ->
+            val finalLink = newExtractorLink(
+                source = originalLink.source,
+                name = if (trAudioFiles.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
+                url = originalLink.url,
+                type = originalLink.type
+            ) {
+                this.referer = originalLink.referer
+                this.quality = originalLink.quality
+                this.headers = originalLink.headers ?: emptyMap()
+                this.extractorData = originalLink.extractorData
                 
-                if (bestMatch != null) {
-                    fhd.loadLinks(bestMatch.url, isCasting, subtitleCallback) { fhdLink ->
-                        val audioUrl = if (fhdLink.url.contains(".m3u8")) fhdLink.url else "${fhdLink.url}#.m3u8"
-                        // Suspend işleme girmeden metin verilerini listede topluyoruz
-                        rawTrAudio.add(Pair(audioUrl, fhdLink.headers ?: mapOf("Referer" to fhd.mainUrl)))
-                    }
+                if (trAudioFiles.isNotEmpty()) {
+                    this.audioTracks = trAudioFiles
                 }
-            } catch (e: Exception) {
-                Log.e("FourKHDHub", "FHD Ses Çekme Hatası: ${e.message}")
             }
-        }
-        // ===============================================================
-
-        val interceptCallback: (ExtractorLink) -> Unit = { originalLink ->
-            // Sistemin kilitlenmesini engellemek için suspend görevleri arkaplanda launch ile başlatıyoruz
-            CoroutineScope(Dispatchers.IO).launch {
-                val audioTracksList = rawTrAudio.map { rawData ->
-                    newAudioFile(rawData.first) {
-                        this.headers = rawData.second
-                    }
-                }
-
-                val linkWithAudio = newExtractorLink(
-                    source = originalLink.source,
-                    name = if (audioTracksList.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
-                    url = originalLink.url,
-                    type = originalLink.type
-                ) {
-                    this.referer = originalLink.referer
-                    this.quality = originalLink.quality
-                    this.headers = originalLink.headers ?: emptyMap()
-                    this.extractorData = originalLink.extractorData
-                    
-                    if (audioTracksList.isNotEmpty()) {
-                        this.audioTracks = audioTracksList
-                    }
-                }
-                callback.invoke(linkWithAudio)
-            }
+            callback.invoke(finalLink)
         }
 
-        cleanLinks.amap { raw ->
-            val resolved = try {
-                if (raw.contains("id=")) getRedirectLinks(raw) else raw
-            } catch (e: Exception) {
-                Log.e("FourKHDHub", "Redirect failed: $raw — ${e.message}")
-                return@amap
-            }
-            if (resolved.isBlank()) return@amap
-
-            try {
-                if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, interceptCallback)
-                } else {
-                    loadExtractor(resolved, name, subtitleCallback, interceptCallback)
-                }
-            } catch (e: Exception) {
-                Log.e("FourKHDHub", "Extractor failed: $resolved — ${e.message}")
-            }
-        }
-        return true
+        return@coroutineScope true
     }
 }
