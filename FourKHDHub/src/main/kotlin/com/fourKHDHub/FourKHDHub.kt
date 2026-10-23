@@ -8,10 +8,12 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -237,7 +239,6 @@ class FourKHDHub : MainAPI() {
                 }
             }
 
-            // Additional fallback: download-item blocks that carry season info
             document.select("div.download-item").forEach { item ->
                 val headerText = item.select("div.flex-1.text-left.font-semibold").text()
                 val season     = Regex("""S([0-9]+)""").find(headerText)?.groupValues?.get(1)?.toIntOrNull()
@@ -322,7 +323,14 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
-            newMovieLoadResponse(fixedTitle, url, TvType.Movie, hrefs) {
+            // Film adını ve linkleri JSON nesnesi olarak paketliyoruz
+            val moviePayload = JSONObject().apply {
+                put("isMovie", true)
+                put("title", fixedTitle)
+                put("links", org.json.JSONArray(hrefs))
+            }.toString()
+
+            newMovieLoadResponse(fixedTitle, url, TvType.Movie, moviePayload) {
                 this.posterUrl           = fixedPoster
                 this.backgroundPosterUrl = fixedBackdrop
                 try { this.logoUrl = logoPath } catch (_: Throwable) {}
@@ -344,15 +352,38 @@ class FourKHDHub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val links = try {
-            val arr = org.json.JSONArray(data)
-            (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }
-        } catch (_: Exception) {
-            listOf(data).filter { it.isNotBlank() }
-        }.filter { it.isNotBlank() }.distinct()
-        if (links.isEmpty()) return false
+        var isMovie = false
+        var movieTitle: String? = null
+        val links = mutableListOf<String>()
 
-        links.amap { raw ->
+        try {
+            if (data.trim().startsWith("{")) {
+                val json = JSONObject(data)
+                isMovie = json.optBoolean("isMovie", false)
+                movieTitle = json.optString("title")
+                val arr = json.optJSONArray("links")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) links.add(arr.optString(i))
+                }
+            } else {
+                val arr = org.json.JSONArray(data)
+                for (i in 0 until arr.length()) links.add(arr.optString(i))
+            }
+        } catch (_: Exception) {
+            links.add(data)
+        }
+
+        val validLinks = links.filter { it.isNotBlank() }.distinct()
+        if (validLinks.isEmpty()) return false
+
+        val interceptorCallback = { link: ExtractorLink ->
+            CoroutineScope(Dispatchers.IO).launch {
+                FourKHDHubAudio.applyAudioTrack(link, isMovie, movieTitle, callback)
+            }
+            Unit
+        }
+
+        validLinks.amap { raw ->
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
             } catch (e: Exception) {
@@ -363,9 +394,9 @@ class FourKHDHub : MainAPI() {
 
             try {
                 if (resolved.contains("hubcloud", ignoreCase = true)) {
-                    HubCloud().getUrl(resolved, name, subtitleCallback, callback)
+                    HubCloud().getUrl(resolved, name, subtitleCallback) { link -> interceptorCallback(link) }
                 } else {
-                    loadExtractor(resolved, name, subtitleCallback, callback)
+                    loadExtractor(resolved, name, subtitleCallback) { link -> interceptorCallback(link) }
                 }
             } catch (e: Exception) {
                 Log.e("4KHDHub", "Extractor failed: $resolved — ${e.message}")
