@@ -44,7 +44,7 @@
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/FourKHDHub.cs3",
         "status": 1,
-        "version": 1,
+        "version": 2,
         "name": "FourKHDHub",
         "internalName": "FourKHDHub",
         "authors": [
@@ -60,7 +60,7 @@
         ],
         "iconUrl": "https://4khdhub.one/favicon.ico",
         "apiVersion": 1,
-        "fileHash": "sha256-3fabafa815b4c7fb3923307d2e1f3b0dae0d090c1e05af5e8e4b556bebefe0e6"
+        "fileHash": "sha256-541888c094ec32d199c5b1ba1a2a7b5bf17ccbe29734720e6467f29a88643a24"
     },
     {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/fullhdfilm.cs3",
