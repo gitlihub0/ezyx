@@ -83,6 +83,30 @@
         "fileHash": "sha256-db6b8b2bf85f3795602ad65cf3109d42adb5cfa8424997348c6926377488e17f"
     },
     {
+        "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/TorraStream.cs3",
+        "status": 1,
+        "version": 89,
+        "name": "TorraStream",
+        "internalName": "TorraStream",
+        "authors": [
+            "Phisher98"
+        ],
+        "description": "#1 Best Extension \u2013 MultiAPI-Based with 4K Torrent Support (Debian) Use Extension Settings",
+        "fileSize": 202559,
+        "repositoryUrl": "https://github.com/gitlihub0/ezyx",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "Torrent",
+            "AsianDrama",
+            "TvSeries",
+            "Anime"
+        ],
+        "iconUrl": "https://torrentio.strem.fun/images/logo_v1.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-25430bb174ce8f646d2fb17266d85b25019cbf4a067fac810821a87926487838"
+    },
+    {
         "url": "https://raw.githubusercontent.com/gitlihub0/ezyx/builds/TvDiziler.cs3",
         "status": 1,
         "version": 1,
