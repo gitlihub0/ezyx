@@ -79,7 +79,7 @@ object TorraStreamAudio {
         return null
     }
 
-    // Torrent/Debrid linkine Türkçe ses dosyasını enjekte eder
+    // Torrent/Debrid linkine Türkçe ses dosyasını enjekte eder (name parametresi hatası giderildi)
     suspend fun applyAudioTrack(
         link: ExtractorLink,
         imdbId: String?,
@@ -97,7 +97,6 @@ object TorraStreamAudio {
                 this.audioTracks = listOf(
                     AudioFile(
                         url = audioTrackUrl,
-                        name = "Türkçe Stereo AAC · FullHDFilm",
                         headers = mapOf(
                             "Origin" to "https://www.fullhdfilmizlesene.now",
                             "Referer" to "https://www.fullhdfilmizlesene.now/"
