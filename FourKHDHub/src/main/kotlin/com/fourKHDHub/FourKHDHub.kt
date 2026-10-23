@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
+import kotlinx.coroutines.runBlocking
 
 class FourKHDHub : MainAPI() {
     override var mainUrl: String = "https://4khdhub.one"
@@ -392,11 +393,13 @@ class FourKHDHub : MainAPI() {
                     fhd.loadLinks(bestMatch.url, isCasting, subtitleCallback) { fhdLink ->
                         val audioUrl = if (fhdLink.url.contains(".m3u8")) fhdLink.url else "${fhdLink.url}#.m3u8"
                         
-                        trAudioFiles.add(
+                        // CloudStream'in yeni mimarisine uygun runBlocking çözümü
+                        val newAudio = runBlocking {
                             newAudioFile(audioUrl) {
                                 this.headers = fhdLink.headers ?: mapOf("Referer" to fhd.mainUrl)
                             }
-                        )
+                        }
+                        trAudioFiles.add(newAudio)
                     }
                 }
             } catch (e: Exception) {
@@ -406,25 +409,27 @@ class FourKHDHub : MainAPI() {
         // ===============================================================
 
         val interceptCallback: (ExtractorLink) -> Unit = { originalLink ->
-            val linkWithAudio = newExtractorLink(
-                source = originalLink.source,
-                name = if (trAudioFiles.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
-                url = originalLink.url,
-                type = originalLink.type
-            ) {
-                this.referer = originalLink.referer
-                this.quality = originalLink.quality
-                this.headers = originalLink.headers ?: emptyMap()
-                this.extractorData = originalLink.extractorData
-                
-                if (trAudioFiles.isNotEmpty()) {
-                    this.audioTracks = trAudioFiles
+            // CloudStream'in yeni mimarisine uygun runBlocking çözümü
+            val linkWithAudio = runBlocking {
+                newExtractorLink(
+                    source = originalLink.source,
+                    name = if (trAudioFiles.isNotEmpty()) "${originalLink.name} + TR Ses (FHD)" else originalLink.name, 
+                    url = originalLink.url,
+                    type = originalLink.type
+                ) {
+                    this.referer = originalLink.referer
+                    this.quality = originalLink.quality
+                    this.headers = originalLink.headers ?: emptyMap()
+                    this.extractorData = originalLink.extractorData
+                    
+                    if (trAudioFiles.isNotEmpty()) {
+                        this.audioTracks = trAudioFiles.toList()
+                    }
                 }
             }
             callback.invoke(linkWithAudio)
         }
 
-        // HATA ÇÖZÜMÜ: Sorun yaratan "amap" yerine standart Kotlin for döngüsü kullanıldı
         for (raw in cleanLinks) {
             val resolved = try {
                 if (raw.contains("id=")) getRedirectLinks(raw) else raw
