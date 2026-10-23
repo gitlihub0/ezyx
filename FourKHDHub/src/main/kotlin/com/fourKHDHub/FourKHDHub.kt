@@ -8,6 +8,7 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.LoadResponse.Companion.addSimklId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.toNewSearchResponseList
@@ -228,17 +229,8 @@ class FourKHDHub : MainAPI() {
                     }
                 }
 
-                val episodePayloads = hrefsList.distinct().map { rawLink ->
-                    JSONObject().apply {
-                        put("isMovie", false)
-                        put("title", fixedTitle)
-                        put("season", season)
-                        put("episode", episode)
-                        put("link", rawLink)
-                    }.toString()
-                }
-
-                tvSeriesEpisodes += newEpisode(episodePayloads) {
+                // Diziler orijinal yapıda bırakıldı (sorunsuz çalışması için)
+                tvSeriesEpisodes += newEpisode(hrefsList.distinct()) {
                     this.season      = season
                     this.episode     = episode
                     this.name        = epName ?: "Episode $episode"
@@ -246,6 +238,55 @@ class FourKHDHub : MainAPI() {
                     this.description = epOverview
                     addDate(epAir)
                     this.score       = safeScoreFrom10(epRating)
+                }
+            }
+
+            // Additional fallback: download-item blocks that carry season info
+            document.select("div.download-item").forEach { item ->
+                val headerText = item.select("div.flex-1.text-left.font-semibold").text()
+                val season     = Regex("""S([0-9]+)""").find(headerText)?.groupValues?.get(1)?.toIntOrNull()
+                    ?: return@forEach
+                val size       = Regex("""(\d+(?:\.\d+)?\s*GB)""").find(headerText)?.groupValues?.get(1) ?: "Unknown Size"
+                val quality    = Regex("""(\d{3,4}p)""").find(headerText)?.groupValues?.get(1) ?: "Unknown Quality"
+                val hrefList   = item.select("a").mapNotNull { it.attr("href").takeIf { it.isNotBlank() } }
+                val fileTitle  = item.select("div.file-title").text()
+                    .replace(Regex("""\[[^]]*]"""), "")
+                    .replace(Regex("""\(.+?\)"""), "")
+
+                if (hrefList.isNotEmpty()) {
+                    var nextEpisode = maxEpisodePerSeason.getOrDefault(season, 0) + 1
+                    var epName:     String? = null
+                    var epOverview: String? = null
+                    var epThumb:    String? = null
+                    var epAir:      String? = null
+                    var epRating:   Double? = null
+
+                    tmdbSeasonCache[season]?.optJSONArray("episodes")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            val epObj = arr.optJSONObject(i) ?: continue
+                            if (epObj.optInt("episode_number") == nextEpisode) {
+                                epName     = epObj.optString("name").takeIf { it.isNotBlank() }
+                                epOverview = epObj.optString("overview").takeIf { it.isNotBlank() }
+                                epThumb    = epObj.optString("still_path").takeIf { it.isNotBlank() }?.let { TMDBIMAGEBASEURL + it }
+                                epAir      = epObj.optString("air_date").takeIf { it.isNotBlank() }
+                                epRating   = epObj.optDouble("vote_average").takeIf { !it.isNaN() && it > 0.0 }
+                                break
+                            }
+                        }
+                    }
+
+                    tvSeriesEpisodes += newEpisode(hrefList.distinct()) {
+                        this.season      = season
+                        this.episode     = nextEpisode
+                        this.name        = epName ?: "S${season.toString().padStart(2, '0')} – $fileTitle [$quality, $size]".trim()
+                        this.posterUrl   = epThumb
+                        this.description = epOverview
+                        addDate(epAir)
+                        this.score       = safeScoreFrom10(epRating)
+                    }
+
+                    nextEpisode++
+                    maxEpisodePerSeason[season] = nextEpisode - 1
                 }
             }
 
@@ -285,10 +326,10 @@ class FourKHDHub : MainAPI() {
             val movieCastList   = parseCredits(movieCreditsJsonText)
             val finalMovieActors = tmdbActors.ifEmpty { movieCastList }
 
+            // Sadece Filmler için özel JSON payload (İsim ve Linkler)
             val moviePayload = JSONObject().apply {
                 put("isMovie", true)
                 put("title", fixedTitle)
-                put("imdbId", imdbIdFromMovie ?: "")
                 put("links", org.json.JSONArray(hrefs))
             }.toString()
 
@@ -314,38 +355,24 @@ class FourKHDHub : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        var isMovie = true
+        var isMovie = false
         var movieTitle: String? = null
-        var imdbId: String? = null
-        var season: Int? = null
-        var episode: Int? = null
         val links = mutableListOf<String>()
 
         try {
             if (data.trim().startsWith("{")) {
                 val json = JSONObject(data)
-                isMovie = json.optBoolean("isMovie", true)
+                isMovie = json.optBoolean("isMovie", false)
                 movieTitle = json.optString("title").takeIf { it.isNotBlank() }
-                imdbId = json.optString("imdbId").takeIf { it.isNotBlank() }
-                season = json.optInt("season", -1).takeIf { it != -1 }
-                episode = json.optInt("episode", -1).takeIf { it != -1 }
-                
-                val singleLink = json.optString("link")
-                if (singleLink.isNotBlank()) {
-                    links.add(singleLink)
-                } else {
-                    val arr = json.optJSONArray("links")
-                    if (arr != null) {
-                        for (i in 0 until arr.length()) {
-                            links.add(arr.optString(i))
-                        }
+                val arr = json.optJSONArray("links")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        links.add(arr.optString(i))
                     }
                 }
             } else {
                 val arr = org.json.JSONArray(data)
-                for (i in 0 until arr.length()) {
-                    links.add(arr.optString(i))
-                }
+                (0 until arr.length()).mapNotNull { arr.optString(it, "").takeIf { s -> s.isNotBlank() } }.let { links.addAll(it) }
             }
         } catch (_: Exception) {
             links.add(data)
@@ -355,10 +382,14 @@ class FourKHDHub : MainAPI() {
         if (validLinks.isEmpty()) return false
 
         val interceptorCallback = { link: ExtractorLink ->
-            CoroutineScope(Dispatchers.IO).launch {
-                FourKHDHubAudio.applyAudioTrack(link, isMovie, imdbId, movieTitle, season, episode, callback)
+            if (isMovie && !movieTitle.isNullOrBlank()) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    FourKHDHubAudio.applyAudioTrack(link, true, null, movieTitle, null, null, callback)
+                }
+                Unit
+            } else {
+                callback.invoke(link)
             }
-            Unit
         }
 
         validLinks.amap { raw ->
